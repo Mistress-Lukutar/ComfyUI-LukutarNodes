@@ -1,15 +1,20 @@
 # ComfyUI-LukutarNodes
 
-Custom node pack for [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-by Mistress-Lukutar.
+A collection of custom nodes for
+[ComfyUI](https://github.com/comfyanonymous/ComfyUI) by Mistress-Lukutar.
+
+The pack is organized as a home for standalone image-processing nodes:
+each node lives in its own module under `nodes/`, backed by a pure
+numpy/OpenCV engine under `core/` (no ComfyUI imports, unit-testable
+anywhere) and thin tensor-conversion helpers under `utils/`.
 
 ## Nodes
 
 ### Color Match (Frequency Split)
 
 Restores the color distribution of a **reference** image onto a
-**processed** image (for example an SD upscale) while keeping the processed
-image's detail.
+**processed** image (for example an SD upscale) while keeping the
+processed image's detail.
 
 The node splits the input into frequency layers with a Gaussian blur
 (`sigma` = cutoff frequency), transfers the color statistics of the
@@ -22,10 +27,27 @@ input ──┬─ Gaussian(σ) ──> low ──> color transfer <── Gauss
                                                         ├── + ──> output
 ```
 
-Typical use case: SD iterative upscaling drifts colors through repeated VAE
-encode/decode cycles. Feed the pre-drift image as `reference` and the
-upscaled result as `image` to bring the colors back without losing the
-upscaled detail.
+**Typical use case.** SD iterative upscaling drifts colors through
+repeated VAE encode/decode cycles. Feed the pre-drift image as
+`reference` and the upscaled result as `image` to bring the colors back
+without losing the upscaled detail.
+
+**Color transfer methods:**
+
+- `reinhard` — transfers per-channel mean/std in LAB space from the
+  reference low layer onto the input low layer. The default; preserves
+  the input's tonal structure while adopting the reference's color
+  envelope.
+- `replace` — swaps the input's low-frequency layer for the reference's
+  verbatim. Stronger effect; useful when the drift is severe.
+
+**Auto-tune.** With `auto_tune` enabled the node grid-searches sigma
+from `sigma_min` to `sigma_max` in `sigma_step` increments, scores each
+candidate with a fixed evaluation blur (`eval_sigma`) and reuses the
+winning sigma for the whole batch. The `envelope` metric compares
+blurred layers only (color/tonal accuracy, detail ignored); `full`
+compares raw images (color + structure). The winning sigma is returned
+as the `sigma` output so it can be wired into other nodes.
 
 #### Inputs
 
@@ -54,19 +76,19 @@ upscaled detail.
 - `reference` with a single frame is broadcast to every frame of `image`.
 - Matching batch sizes are processed pairwise.
 - Mismatched larger batches raise an error on the node.
-- Auto-tune searches on the first frame pair only, then applies the winning
-  sigma to the whole batch (consistent processing for video).
+- Auto-tune searches on the first frame pair only, then applies the
+  winning sigma to the whole batch (consistent processing for video).
 
 ## Installation
 
 **Via ComfyUI-Manager:** Custom Nodes Manager → *Install via git URL* →
-URL of this repository.
+`https://github.com/Mistress-Lukutar/ComfyUI-LukutarNodes`
 
 **Manual:**
 
 ```bash
 cd <ComfyUI>/custom_nodes
-git clone <url-of-this-repo>
+git clone https://github.com/Mistress-Lukutar/ComfyUI-LukutarNodes
 ```
 
 Or, to develop straight from a checkout (Windows, no copying):
@@ -85,11 +107,19 @@ by ComfyUI-Manager (`opencv-python`; torch and numpy ship with ComfyUI).
 pytest
 
 # Node loading + end-to-end smoke test with ComfyUI's own python
-"C:/Ai/ComfyUI_windows_portable/python_embeded/python.exe" tests/smoke_test_comfyui_load.py
+"<ComfyUI>/python_embeded/python.exe" tests/smoke_test_comfyui_load.py
 ```
 
-Layout: `core/` — pure numpy/OpenCV engines, no ComfyUI imports;
-`nodes/` — ComfyUI node classes; `utils/` — tensor conversion helpers.
+Layout:
+
+```
+core/    pure numpy/OpenCV engines, no ComfyUI imports
+nodes/   ComfyUI node classes (INPUT_TYPES, tensor glue)
+utils/   torch tensor conversion helpers
+tests/   pytest suite + ComfyUI loader smoke test
+```
+
+The node appears in ComfyUI under the `Lukutar/Image` category.
 
 ## License
 
