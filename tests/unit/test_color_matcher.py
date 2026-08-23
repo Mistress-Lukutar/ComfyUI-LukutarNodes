@@ -3,7 +3,7 @@ File:   test_color_matcher.py
 Brief:  Unit tests for the frequency-separation color matching engine.
 Author: Mistress-Lukutar
 Date:   2026-08-24
-Version: v0.1.0
+Version: v0.2.0
 '''
 
 from __future__ import annotations
@@ -130,6 +130,23 @@ def test_tune_sigma_returns_grid_candidate() -> None:
     assert tuned.score >= 0.0
     assert tuned.image.shape == target.shape
     assert tuned.image.dtype == np.uint8
+
+
+def test_tune_sigma_reports_progress() -> None:
+    reference = _make_reference()
+    target = _color_shifted(reference)
+    seen: list[float] = []
+    tuned = tune_sigma(
+        reference,
+        target,
+        sigma_min=4.0,
+        sigma_max=24.0,
+        sigma_step=4.0,
+        eval_sigma=10.0,
+        on_candidate=lambda sigma, score: seen.append(sigma),
+    )
+    assert seen == [4.0, 8.0, 12.0, 16.0, 20.0, 24.0]
+    assert tuned.sigma in seen
 
 
 def test_tune_sigma_rejects_inverted_grid() -> None:

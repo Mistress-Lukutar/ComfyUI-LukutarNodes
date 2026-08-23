@@ -19,13 +19,7 @@ processed image's detail.
 The node splits the input into frequency layers with a Gaussian blur
 (`sigma` = cutoff frequency), transfers the color statistics of the
 reference onto the low-frequency layer, and recombines it with the
-untouched high-frequency detail of the input:
-
-```
-input ──┬─ Gaussian(σ) ──> low ──> color transfer <── Gaussian(σ) ── reference
-        └───────────────────────> high ──────────────────┐
-                                                        ├── + ──> output
-```
+untouched high-frequency detail of the input.
 
 **Typical use case.** SD iterative upscaling drifts colors through
 repeated VAE encode/decode cycles. Feed the pre-drift image as
@@ -79,6 +73,12 @@ as the `sigma` output so it can be wired into other nodes.
 - Auto-tune searches on the first frame pair only, then applies the
   winning sigma to the whole batch (consistent processing for video).
 
+#### Progress reporting
+
+The node drives the ComfyUI progress bar: per frame in manual mode, per
+sigma candidate plus per frame while auto-tuning. Every auto-tune
+candidate and its score are also echoed to the ComfyUI console log.
+
 ## Installation
 
 **Via ComfyUI-Manager:** Custom Nodes Manager → *Install via git URL* →
@@ -90,13 +90,6 @@ as the `sigma` output so it can be wired into other nodes.
 cd <ComfyUI>/custom_nodes
 git clone https://github.com/Mistress-Lukutar/ComfyUI-LukutarNodes
 ```
-
-Or, to develop straight from a checkout (Windows, no copying):
-
-```bat
-mklink /J "<ComfyUI>\custom_nodes\ComfyUI-LukutarNodes" "C:\_Source\ComfyUI-LukutarNodes"
-```
-
 Restart ComfyUI afterwards. `requirements.txt` is picked up automatically
 by ComfyUI-Manager (`opencv-python`; torch and numpy ship with ComfyUI).
 

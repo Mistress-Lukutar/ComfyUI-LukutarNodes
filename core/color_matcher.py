@@ -3,12 +3,13 @@ File:   color_matcher.py
 Brief:  Frequency-separation color matching engine (numpy/OpenCV, RGB).
 Author: Mistress-Lukutar
 Date:   2026-08-24
-Version: v0.1.0
+Version: v0.2.0
 '''
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import cv2
@@ -265,6 +266,7 @@ def tune_sigma(
     eval_sigma: float = DEFAULT_EVAL_SIGMA,
     metric: str = METRIC_ENVELOPE,
     method: str = METHOD_REINHARD,
+    on_candidate: Callable[[float, float], None] | None = None,
 ) -> TuneResult:
     '''Grid-search sigma to minimize the color envelope error.
 
@@ -277,6 +279,9 @@ def tune_sigma(
         eval_sigma: Fixed blur radius for the envelope metric.
         metric: Scoring metric, one of EVAL_METRICS.
         method: Color transfer method, one of MATCH_METHODS.
+        on_candidate: Optional progress callback invoked as
+            ``on_candidate(sigma, score)`` after each grid candidate is
+            scored, in ascending sigma order.
 
     Returns:
         Best candidate: sigma, score and the processed image.
@@ -301,6 +306,8 @@ def tune_sigma(
             result, original, eval_sigma=eval_sigma, metric=metric
         )
         logger.debug("tune_sigma: candidate=%.2f score=%.3f", candidate, score)
+        if on_candidate is not None:
+            on_candidate(float(candidate), score)
         if best is None or score < best.score:
             best = TuneResult(sigma=float(candidate), score=score, image=result)
 
