@@ -1,0 +1,2 @@
+# Runtime dependencies beyond the ComfyUI base (torch, numpy ship with it).
+opencv-python>=4.8
