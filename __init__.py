@@ -3,12 +3,12 @@ File:   __init__.py
 Brief:  ComfyUI-LukutarNodes custom node pack entry point.
 Author: Mistress-Lukutar
 Date:   2026-08-24
-Version: v0.2.0
+Version: v0.3.0
 '''
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 if __package__:
     # Normal case: imported as a package (ComfyUI's custom node loader,

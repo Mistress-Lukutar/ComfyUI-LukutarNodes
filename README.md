@@ -79,6 +79,59 @@ The node drives the ComfyUI progress bar: per frame in manual mode, per
 sigma candidate plus per frame while auto-tuning. Every auto-tune
 candidate and its score are also echoed to the ComfyUI console log.
 
+### SEGS BBox Overlay
+
+Draws [Impact Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack)
+SEGS detections on an image the way YOLO demos do: an outlined bounding
+box per segment with a filled caption plate (class name, optionally
+with the confidence percentage) and an optional semi-transparent tint
+of the segment masks.
+
+Feed it the output of `SEGM Detector (SEGS)` (e.g. the bbox detector
+used by ADetailer) plus the image the detector ran on. The `segs` input
+is passed through unchanged, so the node can be inserted between the
+detector and a Detailer pipeline to preview exactly what will be
+repainted.
+
+**Colors.** In `auto` mode each class gets a stable color from a
+built-in vivid palette (same class = same color, regardless of
+detection order). In `single` mode every detection is drawn with one
+user color (`color_r`/`color_g`/`color_b`, only used by that mode).
+
+**Size mismatch.** When the image resolution differs from the one
+recorded in SEGS (e.g. the detection ran on an upscaled copy but you
+preview the original), all coordinates and masks are rescaled
+proportionally — automatically.
+
+Captions use OpenCV's built-in Hershey font, so labels are limited to
+ASCII characters (detector class names like `face` or `hand` are fine).
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| image | IMAGE | — | Image to draw on, e.g. the one the detector ran on. |
+| segs | SEGS | — | Segments from an Impact Pack detector (SEGM Detector (SEGS)). |
+| label_format | COMBO | label+confidence | `label`: class name only. `label+confidence`: append the score, e.g. `face 91%`. |
+| draw_masks | BOOLEAN | masks | Tint the segment masks (`boxes only` to disable). |
+| mask_alpha | FLOAT | 0.45 | Mask tint strength, 0–1. |
+| thickness | INT | 0 | Box border width in pixels; 0 = auto from the image height. |
+| font_scale | FLOAT | 1.0 | Multiplier on the auto caption text size. |
+| color_mode | COMBO | auto | `auto`: stable color per class from the palette. `single`: one user color. |
+| color_r / color_g / color_b | INT | 0 / 255 / 0 | Single color mode's RGB channels. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| image | IMAGE | Annotated batch, same resolution as `image`. |
+| segs | SEGS | The input SEGS passed through unchanged. |
+
+#### Batch behaviour
+
+- SEGS describe a single image, so the same detections are drawn on
+  every frame of the batch (useful for previewing a video pass).
+
 ## Installation
 
 **Via ComfyUI-Manager:** Custom Nodes Manager → *Install via git URL* →

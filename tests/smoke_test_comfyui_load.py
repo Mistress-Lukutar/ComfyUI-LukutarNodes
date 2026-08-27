@@ -3,7 +3,7 @@ File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
 Date:   2026-08-24
-Version: v0.1.0
+Version: v0.3.0
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -13,6 +13,7 @@ Run with ComfyUI's own python (no server launch required):
 
 from __future__ import annotations
 
+import collections
 import importlib.util
 import sys
 from pathlib import Path
@@ -75,6 +76,34 @@ def _check_image_tensor(tensor: torch.Tensor, expected: torch.Tensor) -> None:
     assert float(tensor.min()) >= 0.0 and float(tensor.max()) <= 1.0
 
 
+def _fake_segs(height: int = 72, width: int = 96) -> tuple:
+    '''Build a SEGS payload shaped like SEGM Detector (SEGS) output.'''
+    seg_type = collections.namedtuple(
+        "SEG",
+        [
+            "cropped_image",
+            "cropped_mask",
+            "confidence",
+            "crop_region",
+            "bbox",
+            "label",
+            "control_net_wrapper",
+        ],
+    )
+    mask = np.zeros((48, 48), dtype=np.float32)
+    mask[8:40, 8:40] = 1.0
+    seg = seg_type(
+        cropped_image=None,
+        cropped_mask=mask,
+        confidence=np.array([0.9124], dtype=np.float32),
+        crop_region=[8, 8, 56, 56],
+        bbox=[16.0, 16.0, 48.0, 48.0],
+        label="face",
+        control_net_wrapper=None,
+    )
+    return (height, width), [seg]
+
+
 def main() -> None:
     pack = load_pack()
     mappings = getattr(pack, "NODE_CLASS_MAPPINGS", None)
@@ -126,7 +155,29 @@ def main() -> None:
     else:
         raise AssertionError("batch mismatch must raise ValueError")
 
-    print("SMOKE TEST PASSED: node loads and behaves as expected")
+    # SEGS overlay node.
+    assert "SegsOverlay" in mappings, "SegsOverlay not registered"
+    assert "SegsOverlay" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+
+    overlay_node = mappings["SegsOverlay"]()
+    segs = _fake_segs()  # size matches the 72x96 synthetic frame
+    overlay_result, segs_out = overlay_node.overlay(image, segs)
+    _check_image_tensor(overlay_result, image)
+    assert segs_out is segs, "SEGS must pass through unchanged"
+    assert not torch.allclose(overlay_result, image), "overlay must draw"
+
+    # Size mismatch: SEGS recorded at double resolution is rescaled.
+    big_segs = _fake_segs(height=144, width=192)
+    scaled_result, _ = overlay_node.overlay(image, big_segs)
+    _check_image_tensor(scaled_result, image)
+    assert not torch.allclose(scaled_result, image), "scaled overlay must draw"
+
+    # Empty SEGS leaves the image untouched.
+    empty_result, _ = overlay_node.overlay(image, ((0, 0), []))
+    _check_image_tensor(empty_result, image)
+    assert torch.allclose(empty_result, image), "empty SEGS must not draw"
+
+    print("SMOKE TEST PASSED: nodes load and behave as expected")
 
 
 if __name__ == "__main__":
