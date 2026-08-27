@@ -3,8 +3,8 @@
 # configure the development workflow.
 [project]
 name = "comfyui-lukutar-nodes"
-version = "0.2.0"
-description = "ComfyUI custom node pack: frequency-separation color matching."
+version = "0.3.0"
+description = "ComfyUI custom node pack: color matching and SEGS overlays."
 authors = [{ name = "Mistress-Lukutar" }]
 readme = "README.md"
 license = { text = "MIT" }
