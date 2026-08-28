@@ -3,7 +3,7 @@
  * Brief:  Rich highlighted input + popup editor for Prompt Annotate.
  * Author: Mistress-Lukutar
  * Date:   2026-08-28
- * Version: v0.5.1
+ * Version: v0.5.3
  *
  * The node's own prompt field is replaced with a "rich input": a
  * transparent-text textarea stacked over a colored backdrop div with
@@ -14,6 +14,12 @@
  *
  * The same rich input (larger) powers the "Annotate..." popup editor
  * with a label palette that wraps the current selection into tags.
+ *
+ * Sizing: the popup input auto-grows with its content (capped at
+ * 60vh); the in-node input is a FILL widget — the node layout owns its
+ * height (it stretches with the node; the minimum is declared to the
+ * layout engine via --comfy-widget-min-height) and typing past the
+ * available height grows the node instead of scrolling.
  *
  * Alignment rules that keep the caret glued to the highlight:
  *  - the backdrop carries NO horizontal padding/border widths that the
@@ -142,8 +148,20 @@ function renderRawMarkup(container, text) {
  * @param {string} options.className Extra class for the wrapper
  *   (e.g. "lk-node-rich" for the compact in-node variant).
  * @param {Function} options.onInput Called with the new text on input.
+ * @param {boolean} options.autoGrow  True (popup): the height follows
+ *   the content between CSS min-height and max-height. False (in-node):
+ *   the height is owned by the node layout and the textarea fills it.
+ * @param {Function} options.onOverflow Fill mode only: called with the
+ *   pixel shortfall when the content no longer fits the field, so the
+ *   host can grow the node.
  */
-function createRichInput({ value = "", className = "", onInput = null } = {}) {
+function createRichInput({
+  value = "",
+  className = "",
+  onInput = null,
+  autoGrow = true,
+  onOverflow = null,
+} = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = `lk-rich${className ? " " + className : ""}`;
 
@@ -170,26 +188,39 @@ function createRichInput({ value = "", className = "", onInput = null } = {}) {
     renderRawMarkup(backdrop, textarea.value);
     syncScroll();
   };
-  // Auto-growing field: no manual resize grip, the height follows the
-  // content between CSS min-height and max-height (scrollbar appears
-  // past the cap).
-  const autoGrow = () => {
+  // Two sizing modes. autoGrow (popup): no manual resize grip, the
+  // height follows the content between CSS min-height and max-height
+  // (scrollbar appears past the cap). fill (in-node): the node layout
+  // owns the height — the textarea stretches with the node and a
+  // shortfall is reported via onOverflow so the host can grow the node
+  // (no internal cap, no phantom scrollbar while the node has room).
+  const growToContent = () => {
     textarea.style.height = "auto";
     const styles = window.getComputedStyle(textarea);
     const min = parseFloat(styles.minHeight) || 0;
     const max = parseFloat(styles.maxHeight) || Number.POSITIVE_INFINITY;
     const needed = textarea.scrollHeight + 2; // + textarea borders
     textarea.style.height = `${Math.min(Math.max(needed, min), max)}px`;
+  };
+  const refit = () => {
+    if (autoGrow) growToContent();
     syncSize();
     render();
   };
   const sync = (text) => {
     if (textarea.value !== text) textarea.value = text;
-    autoGrow();
+    // No onOverflow here: a loaded workflow's saved node size rules.
+    if (autoGrow) growToContent();
+    syncSize();
+    render();
   };
 
   textarea.addEventListener("input", () => {
-    autoGrow();
+    refit();
+    if (!autoGrow) {
+      const deficit = textarea.scrollHeight - textarea.clientHeight;
+      if (deficit > 0) onOverflow?.(Math.ceil(deficit) + 1);
+    }
     onInput?.(textarea.value);
   });
   textarea.addEventListener("scroll", syncScroll);
@@ -199,9 +230,13 @@ function createRichInput({ value = "", className = "", onInput = null } = {}) {
       render();
     }).observe(textarea);
   }
-  autoGrow();
+  // No initial auto-grow here: the element is still detached, so
+  // scrollHeight is 0 and the height would clamp to the CSS minimum.
+  // The host calls refit() once the input is mounted.
+  syncSize();
+  render();
 
-  return { wrapper, textarea, render, sync, autoGrow };
+  return { wrapper, textarea, render, sync, refit };
 }
 
 /* ------------------------------------------------------------------ */
@@ -222,13 +257,13 @@ const STYLE = `
 .lk-rich { position: relative; }
 .lk-rich > .lk-backdrop { position: absolute; top: 1px; left: 1px; z-index: 1;
   background: #1e1e1e; border: none; border-radius: 3px;
-  font: 12px/1.5 monospace; padding: 8px; margin: 0;
+  font: 13px/1.5 monospace; padding: 8px; margin: 0;
   white-space: pre-wrap; word-break: break-word; box-sizing: border-box;
   overflow: hidden; pointer-events: none; user-select: none;
   color: rgba(222, 222, 228, 0.85); }
 .lk-rich > textarea { position: relative; z-index: 2; display: block;
   background: transparent; color: transparent; caret-color: #e8e8e8;
-  font: 12px/1.5 monospace; padding: 8px; margin: 0;
+  font: 13px/1.5 monospace; padding: 8px; margin: 0;
   white-space: pre-wrap; word-break: break-word; box-sizing: border-box;
   width: 100%; min-height: 140px; max-height: 60vh;
   overflow-y: auto; resize: none;
@@ -236,10 +271,21 @@ const STYLE = `
 .lk-rich > textarea:focus { border-color: #777; }
 .lk-rich > textarea::selection { background: rgba(120, 160, 255, 0.3); }
 
-/* Compact variant used inside the node body. */
+/* Compact variant used inside the node body: a FILL widget. ComfyUI
+   stretches the wrapper to the DOM-widget area (computedHeight minus
+   2x10px margin), the textarea flexes to fill the wrapper — no inline
+   height, no caps. --comfy-widget-min-height declares the widget's
+   layout minimum to the node layout engine (104px = ~84px field +
+   the 2x10px margin); no max, so the widget takes all free space and
+   follows node resizes. Content past the available height grows the
+   node (onOverflow) — the scrollbar only shows when the node is
+   deliberately smaller than the text. */
+.lk-rich.lk-node-rich { display: flex; flex-direction: column;
+  --comfy-widget-min-height: 104px; }
 .lk-rich.lk-node-rich > textarea,
 .lk-rich.lk-node-rich > .lk-backdrop { font: 11px/1.45 monospace; }
-.lk-rich.lk-node-rich > textarea { min-height: 48px; max-height: 320px; }
+.lk-rich.lk-node-rich > textarea { flex: 1 1 auto; min-height: 0;
+  max-height: none; }
 
 .lk-overlay { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.6);
   display: flex; align-items: center; justify-content: center; }
@@ -248,7 +294,8 @@ const STYLE = `
   display: flex; flex-direction: column; gap: 10px;
   font: 12px/1.4 sans-serif; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
 .lk-title { font-size: 14px; font-weight: bold; }
-.lk-palette { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lk-palette { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  font-size: 13px; }
 .lk-chip { padding: 3px 10px; border-radius: 10px; cursor: pointer;
   border: 1px solid #666; background: transparent; }
 .lk-chip:hover { filter: brightness(1.3); }
@@ -260,7 +307,7 @@ const STYLE = `
 .lk-buttons .lk-save { background: #4a7a4a; }
 .lk-tools { display: flex; gap: 8px; }
 .lk-tools button { padding: 3px 10px; border-radius: 4px; cursor: pointer;
-  border: 1px solid #555; background: #333; color: #bbb; font-size: 11px; }
+  border: 1px solid #555; background: #333; color: #bbb; font-size: 12px; }
 `;
 
 function ensureStyle() {
@@ -296,8 +343,15 @@ function attachRichInputWidget(node) {
   const rich = createRichInput({
     value: String(textWidget.value ?? ""),
     className: "lk-node-rich",
+    autoGrow: false,
     onInput: (text) => {
       textWidget.value = text;
+    },
+    onOverflow: (deficit) => {
+      // Content no longer fits the widget area: grow the node (native
+      // multiline-widget behavior) — the rich input keeps filling it.
+      node.setSize([node.size[0], node.size[1] + deficit]);
+      node.setDirtyCanvas(true, true);
     },
   });
 
@@ -375,6 +429,9 @@ function openEditor(node) {
   panel.append(title, palette, tools, rich.wrapper, errorLine, buttons);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
+  // Fit the field to its content now that it is laid out — otherwise
+  // it opens at the CSS min-height and jumps on the first keystroke.
+  rich.refit();
   rich.textarea.focus();
 
   function close() {
@@ -451,7 +508,7 @@ function openEditor(node) {
     textarea.focus();
     const innerStart = start + label.length + 1;
     textarea.setSelectionRange(innerStart, innerStart + selected.length);
-    rich.autoGrow();
+    rich.refit();
     refresh();
   }
 
@@ -472,7 +529,7 @@ function openEditor(node) {
       if (overlaps) {
         textarea.setRangeText(match[2], start, end, "end");
         textarea.focus();
-        rich.autoGrow();
+        rich.refit();
         refresh();
         return;
       }
@@ -485,7 +542,7 @@ function openEditor(node) {
   stripBtn.addEventListener("click", () => {
     TAG_RE.lastIndex = 0;
     rich.textarea.value = rich.textarea.value.replace(TAG_RE, "$2");
-    rich.autoGrow();
+    rich.refit();
     refresh();
     rich.textarea.focus();
   });
