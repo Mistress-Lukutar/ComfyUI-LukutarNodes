@@ -1,8 +1,10 @@
-# NOTE: This pack is installed by cloning into ComfyUI/custom_nodes, not
-# via pip. The project table only carries metadata; the tool sections below
-# configure the development workflow.
+# NOTE: This pack is installed by cloning into ComfyUI/custom_nodes or via
+# the ComfyUI registry (https://registry.comfy.org/publishers/mistress-lukutar),
+# not via pip. The project/tool.comfy tables carry registry + package metadata;
+# the tool sections below configure the development workflow.
 [project]
-name = "comfyui-lukutar-nodes"
+# Registry node name — immutable after the first publish.
+name = "lukutar-nodes"
 version = "0.10.0"
 description = "ComfyUI custom node pack: color matching, SEGS overlays, prompt annotation, workflow variables."
 authors = [{ name = "Mistress-Lukutar" }]
@@ -13,6 +15,13 @@ dependencies = [
     # torch and numpy are provided by the ComfyUI runtime.
     "opencv-python>=4.8",
 ]
+
+[project.urls]
+Repository = "https://github.com/Mistress-Lukutar/ComfyUI-LukutarNodes"
+
+[tool.comfy]
+PublisherId = "mistress-lukutar"
+DisplayName = "Lukutar Nodes"
 
 [project.optional-dependencies]
 dev = [
