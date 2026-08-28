@@ -3,7 +3,7 @@
 # configure the development workflow.
 [project]
 name = "comfyui-lukutar-nodes"
-version = "0.8.0"
+version = "0.8.1"
 description = "ComfyUI custom node pack: color matching, SEGS overlays, prompt annotation."
 authors = [{ name = "Mistress-Lukutar" }]
 readme = "README.md"

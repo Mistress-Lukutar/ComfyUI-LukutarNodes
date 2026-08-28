@@ -3,7 +3,7 @@ File:   prompt_annotate.py
 Brief:  ComfyUI nodes for region-wise prompt annotation markup.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.8.0
+Version: v0.8.1
 '''
 
 from __future__ import annotations
@@ -335,8 +335,9 @@ class AnnotationSegmentEditNode:
                         "default": "",
                         "tooltip": (
                             "Tags to add, the comma-separated tags to "
-                            "remove, or the new span's text; unused in "
-                            "delete mode (matched exactly after trimming)"
+                            "remove, or the new span's text; empty text "
+                            "makes the edit a no-op; unused in delete "
+                            "mode (matched exactly after trimming)"
                         ),
                     },
                 ),
@@ -358,14 +359,15 @@ class AnnotationSegmentEditNode:
             mode: One of ``prepend`` / ``append`` / ``remove`` /
                 ``new`` / ``delete``.
             text: Tag(s) to add, the tags to remove, or the new span's
-                text; ignored in ``delete`` mode.
+                text; blank text makes the edit a no-op; ignored in
+                ``delete`` mode.
 
         Returns:
             One-element tuple with the edited annotations.
 
         Raises:
-            ValueError: On unknown labels, an unknown mode, an empty
-                label list or empty text (except in ``delete`` mode).
+            ValueError: On unknown labels, an unknown mode or an empty
+                label list.
         '''
         edited = edit_segment(
             _as_annotations(annotations), label, mode, text
