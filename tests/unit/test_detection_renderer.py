@@ -3,7 +3,7 @@ File:   test_detection_renderer.py
 Brief:  Unit tests for the YOLO-style detection overlay engine.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.3.0
+Version: v0.3.1
 '''
 
 from __future__ import annotations
@@ -185,6 +185,22 @@ def test_input_frame_is_not_mutated() -> None:
     )
     DetectionRenderer(mask_alpha=0.5).render(frame, [detection])
     assert np.array_equal(frame, np.zeros_like(frame))
+
+
+def test_planar_strided_frame_is_rendered() -> None:
+    # VAE-decoded tensors are permuted views: their numpy frames keep a
+    # channel-planar layout that cv2 cannot draw on. render() must
+    # normalize it instead of raising.
+    base = np.full((128, 128, 3), 7, dtype=np.uint8)
+    planar = np.ascontiguousarray(base.transpose(2, 0, 1)).transpose(1, 2, 0)
+    assert not planar.flags["C_CONTIGUOUS"]
+    snapshot = planar.copy()
+    result = DetectionRenderer(draw_masks=False, thickness=2).render(
+        planar, [_box_detection()]
+    )
+    assert result.flags["C_CONTIGUOUS"]
+    assert not np.array_equal(result[40, 64], base[40, 64])
+    assert np.array_equal(planar, snapshot)
 
 
 def test_float_frame_is_converted_to_uint8() -> None:
