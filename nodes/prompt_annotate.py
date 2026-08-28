@@ -3,7 +3,7 @@ File:   prompt_annotate.py
 Brief:  ComfyUI nodes for region-wise prompt annotation markup.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.7.0
+Version: v0.8.0
 '''
 
 from __future__ import annotations
@@ -275,14 +275,17 @@ class AnnotationLabelsNode:
 
 
 class AnnotationSegmentEditNode:
-    '''Edit one label's text inside the annotations (pass-through).
+    '''Edit labels inside the annotations (pass-through).
 
     Takes ANNOTATIONS in and emits the edited ANNOTATIONS out, so one
     shared Prompt Annotate can feed several branches with different
-    tweaks: `prepend`/`append` put the typed tags before/after the
-    label's text, `remove` deletes the typed comma-separated tags from
-    it. The implicit `all` label edits the unmarked common part. A span
-    shared by several labels is edited for all of them.
+    tweaks. The label field takes several labels comma-separated and
+    every mode applies to all of them: `prepend`/`append` put the typed
+    tags before/after each label's text, `remove` deletes the typed
+    comma-separated tags from it, `new` appends a fresh span with the
+    typed labels and text, and `delete` removes the labels with their
+    content entirely (the text field is unused there). The implicit
+    `all` label edits the unmarked common part.
     '''
 
     CATEGORY = "Lukutar/Prompt"
@@ -304,8 +307,10 @@ class AnnotationSegmentEditNode:
                     {
                         "default": "face",
                         "tooltip": (
-                            "Label whose text to edit; unknown labels "
-                            "fail the node listing the available ones"
+                            "Label(s) to edit, comma-separated for "
+                            "several (e.g. 'face, body'); every mode "
+                            "applies to all of them. Unknown labels fail "
+                            "the node listing the available ones"
                         ),
                     },
                 ),
@@ -314,9 +319,12 @@ class AnnotationSegmentEditNode:
                     {
                         "default": "prepend",
                         "tooltip": (
-                            "prepend: put the text before the label's "
-                            "text; append: after it; remove: delete the "
-                            "listed comma-separated tags from it"
+                            "prepend/append: put the text before/after "
+                            "the labels' text; remove: delete the listed "
+                            "comma-separated tags from it; new: append a "
+                            "fresh span with these labels and the text; "
+                            "delete: remove the labels with their content "
+                            "entirely (text unused)"
                         ),
                     },
                 ),
@@ -326,8 +334,9 @@ class AnnotationSegmentEditNode:
                         "multiline": True,
                         "default": "",
                         "tooltip": (
-                            "Tags to add, or the comma-separated tags to "
-                            "remove (matched exactly after trimming)"
+                            "Tags to add, the comma-separated tags to "
+                            "remove, or the new span's text; unused in "
+                            "delete mode (matched exactly after trimming)"
                         ),
                     },
                 ),
@@ -341,19 +350,22 @@ class AnnotationSegmentEditNode:
     def edit(
         self, annotations: Any, label: str, mode: str, text: str
     ) -> tuple[AnnotatedPrompt]:
-        '''Apply one text edit to the chosen label of the annotation.
+        '''Apply one edit to the chosen labels of the annotation.
 
         Args:
             annotations: ANNOTATIONS output of Prompt Annotate.
-            label: Label whose text to edit.
-            mode: One of ``prepend`` / ``append`` / ``remove``.
-            text: Tag(s) to add, or the comma-separated tags to remove.
+            label: Comma-separated label list to edit.
+            mode: One of ``prepend`` / ``append`` / ``remove`` /
+                ``new`` / ``delete``.
+            text: Tag(s) to add, the tags to remove, or the new span's
+                text; ignored in ``delete`` mode.
 
         Returns:
             One-element tuple with the edited annotations.
 
         Raises:
-            ValueError: On an unknown label, unknown mode or empty text.
+            ValueError: On unknown labels, an unknown mode, an empty
+                label list or empty text (except in ``delete`` mode).
         '''
         edited = edit_segment(
             _as_annotations(annotations), label, mode, text

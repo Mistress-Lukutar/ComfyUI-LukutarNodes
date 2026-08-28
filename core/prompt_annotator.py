@@ -3,7 +3,7 @@ File:   prompt_annotator.py
 Brief:  Inline label-markup parser for region-wise prompt annotation.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.6.0
+Version: v0.7.0
 '''
 
 from __future__ import annotations
@@ -31,9 +31,11 @@ IMPACT_ALL_KEY = "ALL"
 #: Impact Pack wildcard header that switches the text into label mode.
 IMPACT_LAB_HEADER = "[LAB]"
 
-#: Editing modes of `edit_segment`: put the text before the label's
-#: first fragment, after its last one, or remove the listed tags.
-EDIT_MODES = ("prepend", "append", "remove")
+#: Editing modes of `edit_segment`: put the text before the labels'
+#: first fragment, after their last one, remove the listed tags from
+#: them, create a new span for labels that do not exist yet, or delete
+#: the labels with their content entirely.
+EDIT_MODES = ("prepend", "append", "remove", "new", "delete")
 
 #: Allowed label characters; a subset of Impact Pack's label charset
 #: (``[A-Za-z0-9_. ]``), minus the characters that would be ambiguous
@@ -148,11 +150,12 @@ def _snippet(text: str, position: int) -> str:
     return text[position : position + _ERROR_SNIPPET]
 
 
-def _unknown_label_message(label: str, segments: dict[str, str]) -> str:
-    '''Build the shared "label not in annotation" error message.'''
+def _missing_labels_message(missing: list[str], segments: dict[str, str]) -> str:
+    '''Build the shared "labels not in annotation" error message.'''
+    quoted = ", ".join(repr(label) for label in missing)
     available = LABEL_LIST_SEPARATOR.join(segments) or "(none)"
     return (
-        f"Label {label!r} has no content in the annotation; "
+        f"Label(s) {quoted} have no content in the annotation; "
         f"available labels: {available}"
     )
 
@@ -367,7 +370,7 @@ def segment_text(
     '''
     segments = annotated.segments_by_label()
     if label not in segments:
-        raise ValueError(_unknown_label_message(label, segments))
+        raise ValueError(_missing_labels_message([label], segments))
     parts: list[str] = []
     if (
         include_common
@@ -498,50 +501,155 @@ def to_markup(annotated: AnnotatedPrompt) -> str:
     return _tokens_to_markup(_structure_tokens(annotated))
 
 
-def edit_segment(
-    annotated: AnnotatedPrompt, label: str, mode: str, text: str
-) -> AnnotatedPrompt:
-    '''Edit one label's text inside the annotation.
+def _parse_label_list(value: str) -> tuple[str, ...]:
+    '''Split a comma-separated label list.
 
-    `mode` picks the edit: ``prepend`` puts `text` before the label's
-    first fragment, ``append`` after its last one (comma-joined);
-    ``remove`` deletes the comma-separated tags listed in `text` from
-    every fragment of the label (exact match after trimming; removing
-    tags that are not present changes nothing and returns the input
-    object as-is). Editing the implicit `all` label edits the unmarked
-    common part in place — it stays unmarked. A span shared between
-    several labels (``|body,hair: text|``) holds one text, so edits to
-    any of its labels change that shared text for all of them; a span
-    emptied by ``remove`` disappears from the annotation.
+    Args:
+        value: Raw label field content, e.g. ``"face, body"``.
+
+    Returns:
+        Deduplicated labels in typed order.
+
+    Raises:
+        ValueError: On an empty list or an invalid label name.
+    '''
+    labels: list[str] = []
+    for label in value.split(LABELS_SEPARATOR):
+        label = label.strip()
+        if not label:
+            continue
+        if not _LABEL_PATTERN.match(label):
+            raise ValueError(
+                f"Invalid label {label!r}: labels may only contain "
+                "letters, digits and underscores"
+            )
+        if label not in labels:
+            labels.append(label)
+    if not labels:
+        raise ValueError("Label list must not be empty")
+    return tuple(labels)
+
+
+def _drop_labels(
+    tokens: list[_Plain | _Tag], labels: tuple[str, ...]
+) -> list[_Plain | _Tag]:
+    '''Remove labels together with their content from a token sequence.
+
+    Tags lose the dropped labels; a tag left without any label vanishes
+    with its text. When the implicit `all` label is dropped, plain runs
+    with content are replaced by plain `", "` glue so surviving spans
+    stay comma-separated in the clean prompt (pure separator runs are
+    kept as they were).
+    '''
+    dropped = set(labels)
+    kept: list[_Plain | _Tag] = []
+    for token in tokens:
+        if isinstance(token, _Tag):
+            remaining = tuple(
+                label for label in token.labels if label not in dropped
+            )
+            if remaining:
+                kept.append(_Tag(labels=remaining, text=token.text))
+        elif DEFAULT_LABEL in dropped and token.text.strip(_SEPARATORS):
+            kept.append(_Plain(text=LABEL_LIST_SEPARATOR))
+        else:
+            kept.append(token)
+    # A dropped tag leaves its neighbouring separator glues adjacent;
+    # coalesce plain runs with the same comma normalization _assemble
+    # applies across dropped empty tags.
+    result: list[_Plain | _Tag] = []
+    for token in kept:
+        if isinstance(token, _Plain) and result and isinstance(
+            result[-1], _Plain
+        ):
+            merged = result[-1].text + token.text
+            merged = _COMMA_RUN.sub(", ", merged)
+            merged = _WHITESPACE_RUN.sub(" ", merged)
+            result[-1] = _Plain(text=merged)
+        else:
+            result.append(token)
+    return result
+
+
+def edit_segment(
+    annotated: AnnotatedPrompt, labels: str, mode: str, text: str
+) -> AnnotatedPrompt:
+    '''Edit labels inside the annotation.
+
+    `labels` is a comma-separated list; every listed label gets the
+    edit applied. `mode` picks the edit:
+
+    - ``prepend`` puts `text` before each label's first fragment,
+      ``append`` after its last one (comma-joined);
+    - ``remove`` deletes the comma-separated tags listed in `text`
+      from every fragment of the labels (exact match after trimming;
+      removing tags that are not present changes nothing and returns
+      the input object as-is);
+    - ``new`` appends one new span ``|labels: text|`` to the end of
+      the prompt; every listed label must not exist yet;
+    - ``delete`` removes the labels with their content entirely —
+      labels are stripped from multi-label tags, spans left without a
+      label vanish with their text; `text` is ignored.
+
+    Editing the implicit `all` label edits the unmarked common part in
+    place (it stays unmarked) and deleting it removes the common text,
+    keeping the separators between the surviving spans. A span shared
+    between several labels (``|body,hair: text|``) holds one text, so
+    edits to any of its labels change that shared text for all of them;
+    a span emptied by ``remove`` disappears from the annotation.
 
     Args:
         annotated: Parsed prompt from `parse_annotated_prompt`.
-        label: Label whose text to edit.
+        labels: Comma-separated label list to apply the edit to.
         mode: One of `EDIT_MODES`.
-        text: Tag(s) to add, or the comma-separated tags to remove.
+        text: Tag(s) to add, the comma-separated tags to remove, or
+            the new span's text; ignored in ``delete`` mode.
 
     Returns:
         The re-parsed edited annotation (offsets recalculated).
 
     Raises:
-        ValueError: On an unknown `mode`, blank `text`, or a label with
-            no content in the annotation.
+        ValueError: On an unknown `mode`, an empty label list, an
+            invalid label name, blank `text` (except in ``delete``),
+            labels missing from the annotation (except in ``new``), or
+            labels already present in ``new`` mode.
     '''
     if mode not in EDIT_MODES:
         raise ValueError(
             f"Unknown edit mode {mode!r}; expected one of: "
             f"{LABEL_LIST_SEPARATOR.join(EDIT_MODES)}"
         )
+    wanted = _parse_label_list(labels)
+    segments = annotated.segments_by_label()
+    if mode == "new":
+        existing = [label for label in wanted if label in segments]
+        if existing:
+            quoted = ", ".join(repr(label) for label in existing)
+            raise ValueError(
+                f"Label(s) {quoted} already exist in the annotation; "
+                "use append or prepend to extend them"
+            )
+    else:
+        missing = [label for label in wanted if label not in segments]
+        if missing:
+            raise ValueError(_missing_labels_message(missing, segments))
     text = text.strip()
-    if not text:
+    if mode != "delete" and not text:
         raise ValueError("Edit text must not be empty")
 
-    segments = annotated.segments_by_label()
-    if label not in segments:
-        raise ValueError(_unknown_label_message(label, segments))
+    if mode == "new":
+        tag = (
+            f"{SPAN_DELIMITER}{LABELS_SEPARATOR.join(wanted)}"
+            f"{LABEL_SEPARATOR} {text}{SPAN_DELIMITER}"
+        )
+        markup = to_markup(annotated)
+        markup = f"{markup}{LABEL_LIST_SEPARATOR}{tag}" if markup else tag
+        return parse_annotated_prompt(markup)
 
     tokens = _structure_tokens(annotated)
-    if mode == "remove":
+    if mode == "delete":
+        tokens = _drop_labels(tokens, wanted)
+    elif mode == "remove":
         removals = {
             part.strip()
             for part in text.split(LABELS_SEPARATOR)
@@ -549,7 +657,7 @@ def edit_segment(
         }
         edited = [
             _with_text(token, _remove_tags(token.text, removals))
-            if _carries(token, label)
+            if any(_carries(token, label) for label in wanted)
             else token
             for token in tokens
         ]
@@ -557,13 +665,14 @@ def edit_segment(
             return annotated
         tokens = edited
     else:
-        targets = [
-            index
-            for index, token in enumerate(tokens)
-            if _carries(token, label) and token.text.strip(_SEPARATORS)
-        ]
-        index = targets[0] if mode == "prepend" else targets[-1]
-        tokens[index] = _with_text(
-            tokens[index], _insert_text(tokens[index].text, text, mode)
-        )
+        for label in wanted:
+            targets = [
+                index
+                for index, token in enumerate(tokens)
+                if _carries(token, label) and token.text.strip(_SEPARATORS)
+            ]
+            index = targets[0] if mode == "prepend" else targets[-1]
+            tokens[index] = _with_text(
+                tokens[index], _insert_text(tokens[index].text, text, mode)
+            )
     return parse_annotated_prompt(_tokens_to_markup(tokens))

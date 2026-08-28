@@ -11,7 +11,8 @@ Wildcard (LAB)** (converts ANNOTATIONS to Impact Pack `[LAB]`
 wildcard text), **Annotation Segment** (extracts one label's text),
 **Annotation Labels** (labels as one comma-separated string) and
 **Annotation Segment Edit** (pass-through ANNOTATIONS → ANNOTATIONS
-per-label text prepend/append/remove).
+editor: prepend/append/remove per label, new/delete segments;
+comma-separated multi-label input).
 The nodes' behavioral contract (inputs, batch semantics, auto-tune,
 progress reporting, markup grammar) is specified in `README.md`; keep
 the README in sync with any behavior change.

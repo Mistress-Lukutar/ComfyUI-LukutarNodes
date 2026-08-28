@@ -1,9 +1,10 @@
 /**
  * File:   prompt_annotate_editor.js
- * Brief:  Rich highlighted input + popup editor for Prompt Annotate.
+ * Brief:  Rich highlighted input + popup editor for Prompt Annotate and
+ *         mode-aware widget states for Annotation Segment Edit.
  * Author: Mistress-Lukutar
  * Date:   2026-08-28
- * Version: v0.5.3
+ * Version: v0.8.0
  *
  * The node's own prompt field is replaced with a "rich input": a
  * transparent-text textarea stacked over a colored backdrop div with
@@ -573,6 +574,59 @@ app.registerExtension({
     nodeType.prototype.onConfigure = function (info) {
       const result = onConfigure?.apply(this, arguments);
       this.lukutarSyncRichInput?.();
+      return result;
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Annotation Segment Edit: gray the text widget in delete mode        */
+/* ------------------------------------------------------------------ */
+
+const EDIT_NODE_NAME = "AnnotationSegmentEdit";
+
+/**
+ * Toggle the text widget's disabled state from the current mode value.
+ * The backend ignores the text in delete mode anyway; this only makes
+ * that visible (the pack stays fully functional without web assets).
+ */
+function syncEditWidgets(node) {
+  const modeWidget = node.widgets?.find((w) => w.name === "mode");
+  const textWidget = node.widgets?.find((w) => w.name === "text");
+  if (!modeWidget || !textWidget) return;
+  const disabled = modeWidget.value === "delete";
+  textWidget.disabled = disabled;
+  const element = textWidget.inputEl ?? textWidget.element;
+  if (element) element.disabled = disabled;
+  node.setDirtyCanvas?.(true, true);
+}
+
+app.registerExtension({
+  name: "LukutarNodes.AnnotationSegmentEditWidgets",
+  beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData?.name !== EDIT_NODE_NAME) return;
+
+    const onNodeCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+      const result = onNodeCreated?.apply(this, arguments);
+      const node = this;
+      const modeWidget = node.widgets?.find((w) => w.name === "mode");
+      const callback = modeWidget?.callback;
+      if (modeWidget) {
+        modeWidget.callback = function (...args) {
+          const cbResult = callback?.apply(this, args);
+          syncEditWidgets(node);
+          return cbResult;
+        };
+      }
+      syncEditWidgets(node);
+      return result;
+    };
+
+    const onConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function (info) {
+      const result = onConfigure?.apply(this, arguments);
+      syncEditWidgets(this);
       return result;
     };
   },

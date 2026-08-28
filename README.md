@@ -22,8 +22,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
   (`Lukutar/Prompt`).
 - **Annotation Labels** — the label set as one comma-separated string
   (`Lukutar/Prompt`).
-- **Annotation Segment Edit** — pass-through per-label text
-  prepend/append/remove on ANNOTATIONS (`Lukutar/Prompt`).
+- **Annotation Segment Edit** — pass-through per-label edits on
+  ANNOTATIONS: prepend/append/remove text, new/delete segments
+  (`Lukutar/Prompt`).
 
 ### Color Match (Frequency Split)
 
@@ -278,37 +279,50 @@ with no tagged regions and `include_common` off the output is empty.
 Pass-through editor for the annotations: takes **ANNOTATIONS in and
 emits edited ANNOTATIONS out**, so one shared Prompt Annotate can feed
 several workflow branches, each with its own tweaks (edits chain
-freely). Pick the `label` to edit, a `mode` and the `text` to apply:
+freely). The `label` field accepts **several labels comma-separated**
+(`face, body`) and every mode applies to all of them:
 
-- `prepend` — put the tags before the label's text
+- `prepend` — put the tags before each label's text
   (`face` + `detailed eyes` → `detailed eyes, blue eyes, smirk`);
 - `append` — put them after it (`… → blue eyes, smirk, smile`);
-- `remove` — delete the listed comma-separated tags from the label's
-  text, matched exactly after trimming (`smirk` → `blue eyes`).
+- `remove` — delete the listed comma-separated tags from the labels'
+  text, matched exactly after trimming (`smirk` → `blue eyes`);
+- `new` — append a fresh span `|labels: text|` to the end of the
+  prompt with the typed labels and text (e.g. `hands, weapon` +
+  `delicate fingers` → a new `|hands,weapon: delicate fingers|` tag);
+  every listed label must not exist yet;
+- `delete` — remove the labels with their content entirely; the text
+  field is unused (the web extension grays it out in this mode).
 
 Notes on the semantics:
 
 - A label spread over several spans is edited at its first span
   (`prepend`) / last span (`append`); `remove` applies to all of them.
 - The `all` label edits the unmarked common part **in place** — the
-  added text stays unmarked, no `|all:|` tag appears.
-- A span shared by several labels (`|body,hair: red hair|`) holds one
-  text, so an edit through any of its labels changes the shared text
-  for all of them; a span emptied by `remove` disappears from the
+  added text stays unmarked, no `|all:|` tag appears; deleting `all`
+  removes the common text, keeping the separators between the
+  surviving spans.
+- `delete` only strips the label from a multi-label span
+  (`|body,hair: red hair|` − `hair` → `|body: red hair|`); a span left
+  without any label disappears with its text.
+- A span shared by several labels holds one text, so `prepend` /
+  `append` / `remove` through any of its labels change that shared
+  text for all of them; a span emptied by `remove` disappears from the
   annotation (and its labels from Annotation Labels / the wildcard).
 - Removing tags that are not present changes nothing — the annotation
   passes through untouched.
-- Unknown labels, unknown modes and blank text fail the node (unknown
-  labels list the available ones).
+- Unknown labels, unknown modes, blank label lists and blank text
+  (except in `delete`) fail the node (unknown labels list the
+  available ones; `new` fails on labels that already exist).
 
 #### Inputs
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | annotations | ANNOTATIONS | — | Annotations from Prompt Annotate. |
-| label | STRING | face | Label whose text to edit; unknown labels fail the node listing the available ones. |
-| mode | COMBO | prepend | `prepend` / `append` / `remove` — see above. |
-| text | STRING | — | Tags to add, or the comma-separated tags to remove (matched exactly after trimming). |
+| label | STRING | face | Label(s) to edit, comma-separated for several; every mode applies to all of them. Unknown labels fail the node listing the available ones. |
+| mode | COMBO | prepend | `prepend` / `append` / `remove` / `new` / `delete` — see above. |
+| text | STRING | — | Tags to add, the comma-separated tags to remove, or the new span's text; unused in `delete` mode. |
 
 #### Outputs
 
