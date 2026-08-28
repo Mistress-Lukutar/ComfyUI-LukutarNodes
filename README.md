@@ -132,6 +132,109 @@ ASCII characters (detector class names like `face` or `hand` are fine).
 - SEGS describe a single image, so the same detections are drawn on
   every frame of the batch (useful for previewing a video pass).
 
+### Prompt Annotate
+
+Annotates **one prompt** with region labels for label-driven
+per-region workflows (e.g. classifier segments → Detailer inpainting).
+The prompt stays a single text that can still drive the base
+generation; only the added markup selects which parts belong to which
+region.
+
+**Markup.** ``|label1,label2: text|`` tags mark `text` as belonging to
+`label1` and `label2`:
+
+```
+masterpiece, |body:1girl, thin|, |face:blue eyes, smirk|, |body,hair:red hair|, |body:stands|, |background:outdoors, park|
+```
+
+- Tags are **flat, never nested** — interleaved regions use repeated
+  labels (`body` appears twice above); one tag may carry several labels.
+- Labels are free-form (`letters`, `digits`, `_`) and should match your
+  classifier's label vocabulary; there is no fixed class list.
+- Text outside tags is the **common part**, implicitly labelled `all`.
+- The `clean_prompt` output strips all markup:
+  `masterpiece, 1girl, thin, blue eyes, smirk, red hair, stands,
+  outdoors, park` — feed it to the base generation.
+- Empty tags (`|face:|`) are dropped with their dangling separators.
+- `|` cannot appear in the prompt text itself; malformed tags fail the
+  node with the offending position.
+
+**Web editor.** With the web assets loaded (they ship with the pack),
+the node's prompt field itself becomes a **rich input**: the markup is
+highlighted live while typing — `|label:` parts dimmed, span text in a
+stable pastel color per label (dark-theme friendly). The field grows
+with its content automatically. The built-in text widget is only
+hidden, so the value keeps serializing into the workflow normally. The
+**Annotate...** button opens a popup editor with the same
+live-highlighted input, larger, plus a palette of the labels already
+used in the text — click one to wrap the current selection. The node
+works without the web assets too — the markup is plain text and can be
+typed by hand.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| text | STRING | — | Prompt with `\|label: text\|` markup (multiline); labels are free-form, typed right into the markup. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| annotations | ANNOTATIONS | Parsed spans; consumed by the two nodes below. |
+| clean_prompt | STRING | The same prompt with all markup removed. |
+
+### Annotations to Wildcard (LAB)
+
+Converts annotations into the **label-mode wildcard** consumed by
+Impact Pack Detailer (SEGS)-style `wildcard` inputs:
+
+```
+[LAB]
+[ALL] masterpiece,
+[body] 1girl, thin, red hair, stands
+[face] blue eyes, smirk
+[hair] red hair
+[background] outdoors, park
+```
+
+The common part becomes the `[ALL]` line; multi-label spans are
+duplicated into each of their label lines. Impact Pack concatenates
+`[ALL]` and the matching label value with no separator, so the `[ALL]`
+line ends with a comma whenever label lines follow.
+
+#### Inputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| annotations | ANNOTATIONS | Annotations from Prompt Annotate. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| wildcard | STRING | `[LAB]`-format wildcard text for Detailer (SEGS). |
+
+### Annotation Segment
+
+Extracts one label's prompt text, e.g. to drive a per-region inpaint
+directly. With `include_common` on, the unmarked common part is
+prepended (`masterpiece, blue eyes, smirk` for `label=face` above).
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| annotations | ANNOTATIONS | — | Annotations from Prompt Annotate. |
+| label | STRING | face | Label to extract; unknown labels fail the node listing the available ones. |
+| include_common | BOOLEAN | common + label | Prepend the unmarked common part of the prompt. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| text | STRING | Prompt text for the selected label. |
+
 ## Installation
 
 **Via ComfyUI-Manager:** Custom Nodes Manager → *Install via git URL* →
@@ -162,10 +265,12 @@ Layout:
 core/    pure numpy/OpenCV engines, no ComfyUI imports
 nodes/   ComfyUI node classes (INPUT_TYPES, tensor glue)
 utils/   torch tensor conversion helpers
+web/js/  frontend extension (prompt annotator popup editor)
 tests/   pytest suite + ComfyUI loader smoke test
 ```
 
-The node appears in ComfyUI under the `Lukutar/Image` category.
+The image nodes appear in ComfyUI under the `Lukutar/Image` category,
+the prompt annotation nodes under `Lukutar/Prompt`.
 
 ## License
 
