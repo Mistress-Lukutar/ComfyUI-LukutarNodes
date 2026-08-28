@@ -14,6 +14,8 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
   reference (`Lukutar/Image`).
 - **SEGS BBox Overlay** — draw Impact Pack SEGS detections on an image
   (`Lukutar/Image`).
+- **SEGS Set Crop Size** — refit Impact Pack SEGS crop regions to an
+  absolute target size, e.g. 512×512 (`Lukutar/Image`).
 - **Prompt Annotate** — inline `|label: text|` region markup in one
   prompt (`Lukutar/Prompt`).
 - **Annotations to Wildcard (LAB)** — annotations → Impact Pack `[LAB]`
@@ -150,6 +152,56 @@ ASCII characters (detector class names like `face` or `hand` are fine).
 
 - SEGS describe a single image, so the same detections are drawn on
   every frame of the batch (useful for previewing a video pass).
+
+### SEGS Set Crop Size
+
+Refits every [Impact Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack)
+SEGS segment's crop region to an **absolute** target size, e.g.
+512×512, instead of the detector's relative `crop_factor`.
+
+Why: `crop_factor` scales with the detection, so the same factor yields
+128×128 crops for small segments and 1024×1024 for large ones, and the
+actual crop sizes are often sampler-unfriendly (552×239). This node
+pins the crop size so every segment is processed at a resolution you
+choose.
+
+The bbox, label, confidence and the mask content are untouched — only
+the crop rectangle (and the mask's alignment to it) changes, so the
+node can sit between a detector (e.g. SEGM Detector (SEGS)) and a
+Detailer pipeline. The added context area around the mask is
+zero-filled in the re-cut mask, exactly like Impact's own crop padding.
+
+**Modes.**
+
+- `exact` — the crop region is exactly `width`×`height`, centered on
+  the bbox. If the bbox itself is larger than the target, the region
+  grows just enough to contain it (rounded up to a multiple of
+  `round_to`) so a detection is never cut off; the size is then larger
+  than requested and a warning is logged.
+- `aspect` — the bbox is scaled uniformly around its center so its
+  longer side equals `max(width, height)`, proportions kept and sizes
+  rounded up to multiples of `round_to` (400×173 @ 512 → 512×224).
+  Never scales below 1×, so the bbox always fits.
+
+**Clamping.** Regions are centered on the bbox center and shifted to
+stay inside the image; a target larger than the image is clamped to
+the image size (with a warning).
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| segs | SEGS | — | Segments from an Impact Pack detector (SEGM Detector (SEGS)). |
+| width | INT | 512 | Target crop width in pixels. |
+| height | INT | 512 | Target crop height in pixels. |
+| mode | COMBO | exact | `exact`: exactly width×height (grown only if the bbox is larger). `aspect`: uniform scale so the bbox's longer side equals max(width, height). |
+| round_to | INT | 8 | Round fitted sizes up to multiples of this (SD-friendly); applies to aspect-mode sizes and bbox-forced growth, the exact target is verbatim. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| segs | SEGS | SEGS with refitted crop regions; bboxes and mask content unchanged. |
 
 ### Prompt Annotate
 
