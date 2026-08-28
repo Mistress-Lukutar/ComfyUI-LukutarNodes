@@ -3,7 +3,7 @@ File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.5.0
+Version: v0.5.2
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -181,6 +181,8 @@ def main() -> None:
     assert "PromptAnnotate" in mappings, "PromptAnnotate not registered"
     assert "AnnotationsWildcard" in mappings
     assert "AnnotationSegment" in mappings
+    assert "AnnotationLabels" in mappings
+    assert "AnnotationSegmentEdit" in mappings
     assert "PromptAnnotate" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
 
     annotate_node = mappings["PromptAnnotate"]()
@@ -205,6 +207,38 @@ def main() -> None:
     assert face_text == "masterpiece, blue eyes, smirk"
     try:
         mappings["AnnotationSegment"]().segment(annotations, "paws")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown label must raise ValueError")
+
+    (labels_str,) = mappings["AnnotationLabels"]().collect(annotations)
+    assert labels_str == "body, face, hair, background", (
+        f"unexpected label list: {labels_str!r}"
+    )
+    (labels_all,) = mappings["AnnotationLabels"]().collect(
+        annotations, include_common=True
+    )
+    assert labels_all == "all, body, face, hair, background"
+
+    # Pass-through edit: append to a label, then strip it back out.
+    edit_node = mappings["AnnotationSegmentEdit"]()
+    (edited,) = edit_node.edit(annotations, "face", "append", "smile")
+    (edited_face,) = mappings["AnnotationSegment"]().segment(
+        edited, "face", include_common=False
+    )
+    assert edited_face == "blue eyes, smirk, smile", (
+        f"unexpected edited face text: {edited_face!r}"
+    )
+    (removed,) = edit_node.edit(
+        annotations, "face", "remove", "blue eyes, smirk"
+    )
+    (labels_after,) = mappings["AnnotationLabels"]().collect(removed)
+    assert labels_after == "body, hair, background", (
+        f"face should be gone after removing its text: {labels_after!r}"
+    )
+    try:
+        edit_node.edit(annotations, "paws", "prepend", "fur")
     except ValueError:
         pass
     else:

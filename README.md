@@ -10,6 +10,21 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 
 ## Nodes
 
+- **Color Match (Frequency Split)** — recolor a processed image from a
+  reference (`Lukutar/Image`).
+- **SEGS BBox Overlay** — draw Impact Pack SEGS detections on an image
+  (`Lukutar/Image`).
+- **Prompt Annotate** — inline `|label: text|` region markup in one
+  prompt (`Lukutar/Prompt`).
+- **Annotations to Wildcard (LAB)** — annotations → Impact Pack `[LAB]`
+  wildcard text (`Lukutar/Prompt`).
+- **Annotation Segment** — extract one label's prompt text
+  (`Lukutar/Prompt`).
+- **Annotation Labels** — the label set as one comma-separated string
+  (`Lukutar/Prompt`).
+- **Annotation Segment Edit** — pass-through per-label text
+  prepend/append/remove on ANNOTATIONS (`Lukutar/Prompt`).
+
 ### Color Match (Frequency Split)
 
 Restores the color distribution of a **reference** image onto a
@@ -182,7 +197,7 @@ typed by hand.
 
 | Name | Type | Description |
 |------|------|-------------|
-| annotations | ANNOTATIONS | Parsed spans; consumed by the two nodes below. |
+| annotations | ANNOTATIONS | Parsed spans; consumed by the nodes below. |
 | clean_prompt | STRING | The same prompt with all markup removed. |
 
 ### Annotations to Wildcard (LAB)
@@ -235,6 +250,71 @@ prepended (`masterpiece, blue eyes, smirk` for `label=face` above).
 | Name | Type | Description |
 |------|------|-------------|
 | text | STRING | Prompt text for the selected label. |
+
+### Annotation Labels
+
+Renders the annotation's label set as one comma-separated string —
+`body, face, hair, background` for the example above — e.g. to feed a
+label picker or to log which regions a workflow covers. Labels keep
+first-appearance order and are deduplicated. The implicit `all` label
+of the unmarked common part is included only with `include_common` on;
+with no tagged regions and `include_common` off the output is empty.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| annotations | ANNOTATIONS | — | Annotations from Prompt Annotate. |
+| include_common | BOOLEAN | regions only | Include the implicit `all` label of the unmarked common part. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| labels | STRING | Comma-separated label list, e.g. `body, face, hair`. |
+
+### Annotation Segment Edit
+
+Pass-through editor for the annotations: takes **ANNOTATIONS in and
+emits edited ANNOTATIONS out**, so one shared Prompt Annotate can feed
+several workflow branches, each with its own tweaks (edits chain
+freely). Pick the `label` to edit, a `mode` and the `text` to apply:
+
+- `prepend` — put the tags before the label's text
+  (`face` + `detailed eyes` → `detailed eyes, blue eyes, smirk`);
+- `append` — put them after it (`… → blue eyes, smirk, smile`);
+- `remove` — delete the listed comma-separated tags from the label's
+  text, matched exactly after trimming (`smirk` → `blue eyes`).
+
+Notes on the semantics:
+
+- A label spread over several spans is edited at its first span
+  (`prepend`) / last span (`append`); `remove` applies to all of them.
+- The `all` label edits the unmarked common part **in place** — the
+  added text stays unmarked, no `|all:|` tag appears.
+- A span shared by several labels (`|body,hair: red hair|`) holds one
+  text, so an edit through any of its labels changes the shared text
+  for all of them; a span emptied by `remove` disappears from the
+  annotation (and its labels from Annotation Labels / the wildcard).
+- Removing tags that are not present changes nothing — the annotation
+  passes through untouched.
+- Unknown labels, unknown modes and blank text fail the node (unknown
+  labels list the available ones).
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| annotations | ANNOTATIONS | — | Annotations from Prompt Annotate. |
+| label | STRING | face | Label whose text to edit; unknown labels fail the node listing the available ones. |
+| mode | COMBO | prepend | `prepend` / `append` / `remove` — see above. |
+| text | STRING | — | Tags to add, or the comma-separated tags to remove (matched exactly after trimming). |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| annotations | ANNOTATIONS | The edited annotations; same type as the input, feeds the other annotation nodes. |
 
 ## Installation
 

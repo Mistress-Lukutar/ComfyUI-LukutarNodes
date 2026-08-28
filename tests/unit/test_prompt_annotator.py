@@ -3,7 +3,7 @@ File:   test_prompt_annotator.py
 Brief:  Unit tests for the inline prompt annotation markup engine.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.4.0
+Version: v0.6.0
 '''
 
 from __future__ import annotations
@@ -13,9 +13,12 @@ from comfyui_lukutar_nodes.core.prompt_annotator import (
     DEFAULT_LABEL,
     AnnotatedPrompt,
     PromptAnnotateError,
+    edit_segment,
+    labels_text,
     parse_annotated_prompt,
     segment_text,
     to_impact_wildcard,
+    to_markup,
 )
 
 _EXAMPLE = (
@@ -159,6 +162,103 @@ def test_segment_text_unknown_label_raises() -> None:
     annotated = parse_annotated_prompt(_EXAMPLE)
     with pytest.raises(ValueError, match="available labels"):
         segment_text(annotated, "paws")
+
+
+def test_labels_text_variants() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    assert labels_text(annotated) == "body, face, hair, background"
+    assert labels_text(annotated, include_common=True) == (
+        "all, body, face, hair, background"
+    )
+
+
+def test_labels_text_without_regions() -> None:
+    plain = parse_annotated_prompt("masterpiece, 1girl, outdoors")
+    assert labels_text(plain) == ""
+    assert labels_text(plain, include_common=True) == DEFAULT_LABEL
+    assert labels_text(parse_annotated_prompt("")) == ""
+
+
+def test_to_markup_round_trip() -> None:
+    for markup in (
+        _EXAMPLE,
+        "masterpiece, 1girl, outdoors",
+        "",
+        "|face:x|, |body:y|",
+        "a, |face:x|, shared, |body:y|, b",
+        "|body,hair:red hair|",
+    ):
+        annotated = parse_annotated_prompt(markup)
+        reparse = parse_annotated_prompt(to_markup(annotated))
+        assert reparse.clean == annotated.clean, markup
+        assert reparse.spans == annotated.spans, markup
+        assert reparse.segments_by_label() == annotated.segments_by_label()
+
+
+def test_edit_segment_prepend_and_append() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    prepended = edit_segment(annotated, "face", "prepend", "detailed eyes")
+    assert segment_text(prepended, "face") == "detailed eyes, blue eyes, smirk"
+    assert len(prepended.spans) == len(annotated.spans)
+    # Multi-span label: prepend goes to the first span, append to the last.
+    solo = edit_segment(annotated, "body", "prepend", "solo")
+    assert segment_text(solo, "body") == "solo, 1girl, thin, red hair, stands"
+    pose = edit_segment(annotated, "body", "append", "standing pose")
+    assert segment_text(pose, "body") == (
+        "1girl, thin, red hair, stands, standing pose"
+    )
+
+
+def test_edit_segment_remove() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    edited = edit_segment(annotated, "face", "remove", "smirk")
+    assert segment_text(edited, "face") == "blue eyes"
+    assert edited.clean == (
+        "masterpiece, 1girl, thin, blue eyes, red hair, stands, "
+        "outdoors, park"
+    )
+
+
+def test_edit_segment_remove_emptying_shared_span() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    # |body,hair:red hair| is shared: emptying it drops the span, so
+    # body loses the text too and the hair label disappears.
+    edited = edit_segment(annotated, "hair", "remove", "red hair")
+    assert edited.labels == ("all", "body", "face", "background")
+    assert segment_text(edited, "body") == "1girl, thin, stands"
+
+
+def test_edit_segment_remove_no_match_is_noop() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    assert edit_segment(annotated, "face", "remove", "freckles") is annotated
+
+
+def test_edit_segment_all_label_edits_common_part_in_place() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    prepended = edit_segment(annotated, DEFAULT_LABEL, "prepend", "best")
+    assert segment_text(prepended, DEFAULT_LABEL) == "best, masterpiece"
+    assert prepended.clean.startswith("best, masterpiece")
+    assert len(prepended.spans) == len(annotated.spans)
+    removed = edit_segment(prepended, DEFAULT_LABEL, "remove", "masterpiece")
+    assert segment_text(removed, DEFAULT_LABEL) == "best"
+
+
+def test_edit_segment_all_label_interior_plain() -> None:
+    annotated = parse_annotated_prompt("a, |face:x|, shared, |body:y|, b")
+    appended = edit_segment(annotated, DEFAULT_LABEL, "append", "common")
+    assert segment_text(appended, DEFAULT_LABEL) == "a, shared, b, common"
+    prepended = edit_segment(annotated, DEFAULT_LABEL, "prepend", "common")
+    assert segment_text(prepended, DEFAULT_LABEL) == "common, a, shared, b"
+
+
+def test_edit_segment_errors() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    with pytest.raises(ValueError, match="available labels"):
+        edit_segment(annotated, "paws", "prepend", "fur")
+    with pytest.raises(ValueError, match="Unknown edit mode"):
+        edit_segment(annotated, "face", "replace", "x")
+    with pytest.raises(ValueError, match="must not be empty"):
+        edit_segment(annotated, "face", "append", "   ")
 
 
 def test_raw_is_preserved() -> None:

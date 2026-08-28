@@ -5,10 +5,13 @@ ComfyUI custom node pack by Mistress-Lukutar. Nodes:
 distribution onto a processed image (e.g. an SD upscale) via Gaussian
 frequency separation; **SEGS BBox Overlay** — draws Impact Pack
 SEGS detections on an image, YOLO-demo style; and the prompt
-annotation trio — **Prompt Annotate** (inline `|label: text|` markup in
+annotation set — **Prompt Annotate** (inline `|label: text|` markup in
 one prompt, outputs ANNOTATIONS + clean STRING), **Annotations to
 Wildcard (LAB)** (converts ANNOTATIONS to Impact Pack `[LAB]`
-wildcard text) and **Annotation Segment** (extracts one label's text).
+wildcard text), **Annotation Segment** (extracts one label's text),
+**Annotation Labels** (labels as one comma-separated string) and
+**Annotation Segment Edit** (pass-through ANNOTATIONS → ANNOTATIONS
+per-label text prepend/append/remove).
 The nodes' behavioral contract (inputs, batch semantics, auto-tune,
 progress reporting, markup grammar) is specified in `README.md`; keep
 the README in sync with any behavior change.
