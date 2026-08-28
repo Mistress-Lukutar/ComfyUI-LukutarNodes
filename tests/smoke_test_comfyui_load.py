@@ -3,7 +3,7 @@ File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.5.2
+Version: v0.5.3
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -243,6 +243,26 @@ def main() -> None:
         pass
     else:
         raise AssertionError("unknown label must raise ValueError")
+
+    # new / delete modes with a comma-separated label list.
+    (grown,) = edit_node.edit(
+        annotations, "hands, weapon", "new", "delicate fingers"
+    )
+    (labels_grown,) = mappings["AnnotationLabels"]().collect(grown)
+    assert labels_grown == "body, face, hair, background, hands, weapon", (
+        f"new mode must append the labels: {labels_grown!r}"
+    )
+    (trimmed,) = edit_node.edit(grown, "face, hands, weapon", "delete", "")
+    (labels_trimmed,) = mappings["AnnotationLabels"]().collect(trimmed)
+    assert labels_trimmed == "body, hair, background", (
+        f"delete mode must remove the labels: {labels_trimmed!r}"
+    )
+    try:
+        edit_node.edit(annotations, "face", "new", "freckles")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("new mode on an existing label must raise")
 
     print("SMOKE TEST PASSED: nodes load and behave as expected")
 

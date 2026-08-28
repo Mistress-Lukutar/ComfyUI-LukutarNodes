@@ -3,7 +3,7 @@ File:   test_prompt_annotator.py
 Brief:  Unit tests for the inline prompt annotation markup engine.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.6.0
+Version: v0.7.0
 '''
 
 from __future__ import annotations
@@ -259,6 +259,82 @@ def test_edit_segment_errors() -> None:
         edit_segment(annotated, "face", "replace", "x")
     with pytest.raises(ValueError, match="must not be empty"):
         edit_segment(annotated, "face", "append", "   ")
+
+
+def test_edit_segment_new_mode() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    edited = edit_segment(
+        annotated, "hands, weapon", "new", "delicate fingers"
+    )
+    assert edited.spans[-1].labels == ("hands", "weapon")
+    assert edited.spans[-1].text == "delicate fingers"
+    assert segment_text(edited, "hands") == "delicate fingers"
+    assert segment_text(edited, "weapon") == "delicate fingers"
+    assert edited.clean == _EXAMPLE_CLEAN + ", delicate fingers"
+
+
+def test_edit_segment_new_mode_empty_annotation() -> None:
+    edited = edit_segment(parse_annotated_prompt(""), "face", "new", "smirk")
+    assert to_markup(edited) == "|face: smirk|"
+    assert edited.clean == "smirk"
+
+
+def test_edit_segment_new_mode_existing_label_raises() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    with pytest.raises(ValueError, match="already exist"):
+        edit_segment(annotated, "face", "new", "freckles")
+    with pytest.raises(ValueError, match="already exist"):
+        edit_segment(annotated, "hands, face", "new", "freckles")
+
+
+def test_edit_segment_delete_mode() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    edited = edit_segment(annotated, "face, background", "delete", "")
+    assert edited.labels == ("all", "body", "hair")
+    assert edited.clean == "masterpiece, 1girl, thin, red hair, stands"
+
+
+def test_edit_segment_delete_keeps_shared_span_text() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    # |body,hair: red hair| loses only the hair label; body keeps the text.
+    edited = edit_segment(annotated, "hair", "delete", "")
+    assert edited.labels == ("all", "body", "face", "background")
+    assert segment_text(edited, "body") == "1girl, thin, red hair, stands"
+
+
+def test_edit_segment_delete_all_label() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    edited = edit_segment(annotated, DEFAULT_LABEL, "delete", "")
+    assert DEFAULT_LABEL not in edited.segments_by_label()
+    assert edited.clean == (
+        "1girl, thin, blue eyes, smirk, red hair, stands, outdoors, park"
+    )
+    interior = parse_annotated_prompt("a, |face:x|, shared, |body:y|, b")
+    assert edit_segment(interior, DEFAULT_LABEL, "delete", "").clean == "x, y"
+
+
+def test_edit_segment_multiple_labels() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    appended = edit_segment(
+        annotated, "face, background", "append", "detail"
+    )
+    assert segment_text(appended, "face") == "blue eyes, smirk, detail"
+    assert segment_text(appended, "background") == "outdoors, park, detail"
+    removed = edit_segment(
+        annotated, "face, background", "remove", "smirk, park"
+    )
+    assert segment_text(removed, "face") == "blue eyes"
+    assert segment_text(removed, "background") == "outdoors"
+
+
+def test_edit_segment_label_list_validation() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    with pytest.raises(ValueError, match="Invalid label"):
+        edit_segment(annotated, "my label", "new", "x")
+    with pytest.raises(ValueError, match="must not be empty"):
+        edit_segment(annotated, " , ", "append", "x")
+    with pytest.raises(ValueError, match="available labels"):
+        edit_segment(annotated, "paws, face", "prepend", "fur")
 
 
 def test_raw_is_preserved() -> None:
