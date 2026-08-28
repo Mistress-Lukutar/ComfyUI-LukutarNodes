@@ -1,12 +1,13 @@
 '''
 File:   conftest.py
-Brief:  Pytest bootstrap: load the torch-free core subpackage for unit tests.
+Brief:  Pytest bootstrap: load the torch-free subpackages for unit tests.
 Author: Mistress-Lukutar
 Date:   2026-08-24
-Version: v0.1.0
+Version: v0.2.0
 
-Loads only ``core`` so the engine tests run under any python with numpy
-and opencv (no torch required). Node-level behaviour is validated by
+Loads only ``core`` and the torch-free node modules (``nodes.variables``)
+so the engine tests run under any python with numpy and opencv (no torch
+required). Node-level behaviour is validated by
 ``tests/smoke_test_comfyui_load.py`` under ComfyUI's own python.
 '''
 
@@ -37,4 +38,20 @@ def _load_core() -> types.ModuleType:
     return importlib.import_module(f"{PACKAGE_ALIAS}.core")
 
 
+def _load_nodes_stub() -> None:
+    '''Expose ``nodes`` as a stub package without executing its __init__.
+
+    ``nodes/__init__.py`` imports every node module, several of which need
+    torch; ``nodes/variables.py`` alone is torch-free, so tests import it
+    through this stub parent instead.
+    '''
+    name = f"{PACKAGE_ALIAS}.nodes"
+    if name in sys.modules:
+        return
+    stub = types.ModuleType(name)
+    stub.__path__ = [str(PACK_ROOT / "nodes")]
+    sys.modules[name] = stub
+
+
 _load_core()
+_load_nodes_stub()

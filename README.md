@@ -25,6 +25,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **Annotation Segment Edit** — pass-through per-label edits on
   ANNOTATIONS: prepend/append/remove text, new/delete segments
   (`Lukutar/Prompt`).
+- **Set Variable / Get Variable** — named workflow variables: publish a
+  value once, read it anywhere without dragging wires
+  (`Lukutar/Variables`).
 
 ### Color Match (Frequency Split)
 
@@ -330,6 +333,64 @@ Notes on the semantics:
 | Name | Type | Description |
 |------|------|-------------|
 | annotations | ANNOTATIONS | The edited annotations; same type as the input, feeds the other annotation nodes. |
+
+### Set Variable / Get Variable
+
+Named workflow variables: publish a value under a name once and read it
+anywhere in the graph — no wire across groups and collapsed subgraphs
+(`Lukutar/Variables`). The type is arbitrary (IMAGE, MODEL,
+CONDITIONING, SEGS, strings…): the value is passed through untouched,
+so ComfyUI's own execution order and output caching apply, and the node
+titles show the detected type (`Set · img_t2i [IMAGE]`).
+
+The web extension connects each Get to its Set with an **invisible real
+link** (it serializes into the prompt like a normal wire, it just never
+renders on the canvas). Because the connection is real, execution
+ordering, caching, exported API workflows and headless runs all work
+without any extra machinery. A manual wire into the Get's `value` input
+overrides the name; without the web assets the link can simply be wired
+by hand.
+
+#### Set Variable — Inputs / Outputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| var_name | STRING | — | Variable name, e.g. `img_t2i`; Get Variable nodes with this name receive the value. |
+| value | * | — | The value to publish; any type. |
+
+| Name | Type | Description |
+|------|------|-------------|
+| value | * | Pass-through of the input; may be wired normally. |
+
+#### Get Variable — Inputs / Outputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| var_name | STRING | — | Variable name to read, e.g. `img_t2i`. |
+| value | * | — | Connected automatically (invisible); a manual wire overrides the name. |
+
+| Name | Type | Description |
+|------|------|-------------|
+| value | * | The variable's value, with its original type. |
+
+#### Rules
+
+- Names are global to the workflow. Several Set nodes **may** share one
+  name on alternative branches as long as only one branch is active —
+  the "generated or loaded" pattern: muting/bypassing a branch removes
+  its nodes from the prompt, so exactly one Set survives. This is the
+  key difference from KJNodes' Set/Get, which rejects duplicates on the
+  canvas outright.
+- Two **simultaneously active** Sets with one name are ambiguous: the
+  Get stays unlinked (⚠ on both nodes) and the queue fails with a
+  descriptive error. Rename them or mute one branch.
+- Branches merged by a switch node should use a single Set **after**
+  the switch instead.
+- Variables live within one queue run; values are not persisted
+  between runs and cannot be "reassigned" sequentially
+  (set → set → get reads the last) — that is a duplicate-name conflict.
+- Without the web extension, wire the Get's `value` input manually (Set
+  output → Get input works fine headless).
 
 ## Installation
 
