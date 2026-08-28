@@ -12,7 +12,12 @@ wildcard text), **Annotation Segment** (extracts one label's text),
 **Annotation Labels** (labels as one comma-separated string) and
 **Annotation Segment Edit** (pass-through ANNOTATIONS → ANNOTATIONS
 editor: prepend/append/remove per label, new/delete segments;
-comma-separated multi-label input).
+comma-separated multi-label input); and the workflow-variable pair
+**Set Variable** / **Get Variable** (publish any value under a name,
+read it anywhere; `web/js/variables.js` maintains an invisible real
+link between the pair — real so ordering/caching/API export are
+ComfyUI's own; name resolution is mute-aware: several Sets may share a
+name across alternative branches, one active).
 The nodes' behavioral contract (inputs, batch semantics, auto-tune,
 progress reporting, markup grammar) is specified in `README.md`; keep
 the README in sync with any behavior change.
@@ -26,12 +31,14 @@ the README in sync with any behavior change.
   bar). `comfy` imports must be lazy and guarded with
   `try: from comfy... except ImportError: return None` so the module
   imports outside the ComfyUI runtime (pattern: `_make_progress_bar` in
-  `nodes/color_match.py`). The prompt-annotation nodes need neither
-  torch nor comfy and stay pure-string.
-- `web/js/` — frontend extension served via `WEB_DIRECTORY` in the root
+  `nodes/color_match.py`). The prompt-annotation nodes and the
+  variable nodes (`nodes/variables.py`) need neither torch nor comfy
+  and stay pure-python.
+- `web/js/` — frontend extensions served via `WEB_DIRECTORY` in the root
   `__init__.py` (rich highlighted input + popup editor for Prompt
-  Annotate). Vanilla ES module, no build step; the pack must stay fully
-  functional without it.
+  Annotate; invisible Set/Get Variable auto-connection). Vanilla ES
+  modules, no build step; the pack must stay fully functional without
+  them (for Set/Get that means wiring the value input manually).
 - `utils/` — torch IMAGE-tensor ⇄ numpy frame conversion helpers
   (B,H,W,3 float [0,1] RGB ⇄ HWC float32 [0,255] RGB).
 - `tests/unit/` — engine tests, torch-free. `tests/smoke_test_comfyui_load.py`
@@ -40,7 +47,8 @@ the README in sync with any behavior change.
 Adding a node: engine in `core/`, node class in `nodes/`, then register
 it in `nodes/__init__.py` (`NODE_CLASS_MAPPINGS` +
 `NODE_DISPLAY_NAME_MAPPINGS`). ComfyUI menu categories: `Lukutar/Image`
-for image nodes, `Lukutar/Prompt` for the prompt-annotation nodes.
+for image nodes, `Lukutar/Prompt` for the prompt-annotation nodes,
+`Lukutar/Variables` for the variable pair.
 
 ## Commands
 

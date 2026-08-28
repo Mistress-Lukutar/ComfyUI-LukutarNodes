@@ -3,7 +3,7 @@ File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.5.3
+Version: v0.6.0
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -22,6 +22,8 @@ import numpy as np
 import torch
 
 PACK_ROOT = Path(__file__).resolve().parent.parent
+#: Portable-install ComfyUI root, used by the prompt validation e2e part.
+COMFYUI_ROOT = Path("C:/Ai/ComfyUI_windows_portable/ComfyUI")
 
 
 def load_pack() -> object:
@@ -102,6 +104,60 @@ def _fake_segs(height: int = 72, width: int = 96) -> tuple:
         control_net_wrapper=None,
     )
     return (height, width), [seg]
+
+
+def _validate_variables_prompt(mappings: dict[str, type]) -> None:
+    '''Validate a prompt wired the way the web extension serializes it.
+
+    The extension keeps real links EmptyImage -> SetVariable ->
+    GetVariable -> PreviewImage; running that prompt through ComfyUI's
+    own validator proves the ``*`` links and the node contract hold end
+    to end (execution order and caching are the server's own).
+    '''
+    if not COMFYUI_ROOT.exists():
+        print("NOTE: ComfyUI root not found, skipping prompt validation e2e")
+        return
+    sys.path.insert(0, str(COMFYUI_ROOT))
+    try:
+        import asyncio
+
+        import execution
+
+        import nodes as comfy_nodes
+
+        for key in ("SetVariable", "GetVariable"):
+            comfy_nodes.NODE_CLASS_MAPPINGS[key] = mappings[key]
+
+        prompt = {
+            "1": {
+                "class_type": "EmptyImage",
+                "inputs": {
+                    "width": 8,
+                    "height": 8,
+                    "batch_size": 1,
+                    "color": 0,
+                },
+            },
+            "2": {
+                "class_type": "SetVariable",
+                "inputs": {"var_name": "img_t2i", "value": ["1", 0]},
+            },
+            "3": {
+                "class_type": "GetVariable",
+                "inputs": {"var_name": "img_t2i", "value": ["2", 0]},
+            },
+            "4": {
+                "class_type": "PreviewImage",
+                "inputs": {"images": ["3", 0]},
+            },
+        }
+        ok, error, outputs, _node_errors = asyncio.run(
+            execution.validate_prompt("lukutar-smoke", prompt, None)
+        )
+        assert ok, f"variable prompt failed validation: {error}"
+        assert outputs == ["4"], f"unexpected outputs: {outputs}"
+    finally:
+        sys.path.remove(str(COMFYUI_ROOT))
 
 
 def main() -> None:
@@ -263,6 +319,32 @@ def main() -> None:
         pass
     else:
         raise AssertionError("new mode on an existing label must raise")
+
+    # Variable nodes: pass-through Set / Get pair with name validation.
+    assert "SetVariable" in mappings, "SetVariable not registered"
+    assert "GetVariable" in mappings, "GetVariable not registered"
+    assert "SetVariable" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+    assert "GetVariable" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+
+    marker = object()
+    (passed_through,) = mappings["SetVariable"]().set_value("img_t2i", marker)
+    assert passed_through is marker, "Set Variable must pass the value through"
+    (fetched,) = mappings["GetVariable"]().get_value("img_t2i", marker)
+    assert fetched is marker, "Get Variable must emit the wired value"
+    try:
+        mappings["GetVariable"]().get_value("img_t2i")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("unwired GetVariable must raise RuntimeError")
+    try:
+        mappings["SetVariable"]().set_value("   ", marker)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("blank variable name must raise ValueError")
+
+    _validate_variables_prompt(mappings)
 
     print("SMOKE TEST PASSED: nodes load and behave as expected")
 
