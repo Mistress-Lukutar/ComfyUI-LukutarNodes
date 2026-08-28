@@ -3,7 +3,7 @@ File:   prompt_annotator.py
 Brief:  Inline label-markup parser for region-wise prompt annotation.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.4.0
+Version: v0.6.0
 '''
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ SPAN_DELIMITER = "|"
 LABEL_SEPARATOR = ":"
 #: Character separating multiple labels inside one span tag.
 LABELS_SEPARATOR = ","
+#: Separator used when rendering the label set as one string.
+LABEL_LIST_SEPARATOR = ", "
 
 #: Label implicitly assigned to unmarked prompt text.
 DEFAULT_LABEL = "all"
@@ -28,6 +30,10 @@ DEFAULT_LABEL = "all"
 IMPACT_ALL_KEY = "ALL"
 #: Impact Pack wildcard header that switches the text into label mode.
 IMPACT_LAB_HEADER = "[LAB]"
+
+#: Editing modes of `edit_segment`: put the text before the label's
+#: first fragment, after its last one, or remove the listed tags.
+EDIT_MODES = ("prepend", "append", "remove")
 
 #: Allowed label characters; a subset of Impact Pack's label charset
 #: (``[A-Za-z0-9_. ]``), minus the characters that would be ambiguous
@@ -140,6 +146,15 @@ class _Tag:
 def _snippet(text: str, position: int) -> str:
     '''Quote a short fragment of `text` at `position` for messages.'''
     return text[position : position + _ERROR_SNIPPET]
+
+
+def _unknown_label_message(label: str, segments: dict[str, str]) -> str:
+    '''Build the shared "label not in annotation" error message.'''
+    available = LABEL_LIST_SEPARATOR.join(segments) or "(none)"
+    return (
+        f"Label {label!r} has no content in the annotation; "
+        f"available labels: {available}"
+    )
 
 
 def _parse_labels(labels_part: str, position: int) -> tuple[str, ...]:
@@ -352,11 +367,7 @@ def segment_text(
     '''
     segments = annotated.segments_by_label()
     if label not in segments:
-        available = ", ".join(segments) or "(none)"
-        raise ValueError(
-            f"Label {label!r} has no content in the annotation; "
-            f"available labels: {available}"
-        )
+        raise ValueError(_unknown_label_message(label, segments))
     parts: list[str] = []
     if (
         include_common
@@ -366,3 +377,193 @@ def segment_text(
         parts.append(segments[DEFAULT_LABEL])
     parts.append(segments[label])
     return ", ".join(parts)
+
+
+def labels_text(
+    annotated: AnnotatedPrompt, include_common: bool = False
+) -> str:
+    '''Render the annotation's label set as one comma-separated string.
+
+    Labels keep their first-appearance order and are deduplicated,
+    e.g. ``"body, face, hair"``. The implicit `all` label of the
+    unmarked common part is included only when `include_common` is set.
+
+    Args:
+        annotated: Parsed prompt from `parse_annotated_prompt`.
+        include_common: Include the implicit `all` label.
+
+    Returns:
+        The label list joined with `", "`; an empty string when the
+        annotation has no (selected) labels.
+    '''
+    labels = annotated.labels
+    if not include_common:
+        labels = tuple(label for label in labels if label != DEFAULT_LABEL)
+    return LABEL_LIST_SEPARATOR.join(labels)
+
+
+def _structure_tokens(annotated: AnnotatedPrompt) -> list[_Plain | _Tag]:
+    '''Recover the plain/tag token sequence of a parsed annotation.
+
+    Plain runs are sliced out of `clean` between the spans (verbatim,
+    separators included); spans become `_Tag` tokens with their exact
+    label lists and texts.
+    '''
+    tokens: list[_Plain | _Tag] = []
+    cursor = 0
+    for span in annotated.spans:
+        if span.start > cursor:
+            tokens.append(_Plain(annotated.clean[cursor : span.start]))
+        tokens.append(_Tag(labels=span.labels, text=span.text))
+        cursor = max(cursor, span.end)
+    if cursor < len(annotated.clean):
+        tokens.append(_Plain(annotated.clean[cursor:]))
+    return tokens
+
+
+def _tokens_to_markup(tokens: list[_Plain | _Tag]) -> str:
+    '''Join a token sequence back into inline ``|label: text|`` markup.'''
+    parts: list[str] = []
+    for token in tokens:
+        if isinstance(token, _Tag):
+            parts.append(
+                f"{SPAN_DELIMITER}{LABELS_SEPARATOR.join(token.labels)}"
+                f"{LABEL_SEPARATOR} {token.text}{SPAN_DELIMITER}"
+            )
+        else:
+            parts.append(token.text)
+    return "".join(parts)
+
+
+def _carries(token: _Plain | _Tag, label: str) -> bool:
+    '''Whether a structure token carries `label`.
+
+    Tags carry each of their labels; plain runs carry only the implicit
+    `all` label.
+    '''
+    if isinstance(token, _Tag):
+        return label in token.labels
+    return label == DEFAULT_LABEL
+
+
+def _with_text(token: _Plain | _Tag, text: str) -> _Plain | _Tag:
+    '''Copy a token with its text replaced.'''
+    if isinstance(token, _Tag):
+        return _Tag(labels=token.labels, text=text)
+    return _Plain(text=text)
+
+
+def _insert_text(fragment: str, text: str, mode: str) -> str:
+    '''Insert `text` at the start or end of a fragment.
+
+    Separator runs at the touched edge (plain runs keep their `, `
+    glue between spans) are preserved so the surrounding markup still
+    re-parses to a sensibly comma-spaced clean prompt.
+    '''
+    if mode == "prepend":
+        head = fragment[: len(fragment) - len(fragment.lstrip(_SEPARATORS))]
+        return f"{head}{text}, {fragment.lstrip(_SEPARATORS)}"
+    tail = fragment[len(fragment.rstrip(_SEPARATORS)) :]
+    return f"{fragment.rstrip(_SEPARATORS)}, {text}{tail}"
+
+
+def _remove_tags(fragment: str, removals: set[str]) -> str:
+    '''Drop the comma-separated tags in `removals` from a fragment.
+
+    Tags match exactly after trimming; surviving tags are re-joined
+    with normalized `", "` spacing.
+    '''
+    kept = [
+        part.strip()
+        for part in fragment.split(LABELS_SEPARATOR)
+        if part.strip() not in removals
+    ]
+    return LABEL_LIST_SEPARATOR.join(kept)
+
+
+def to_markup(annotated: AnnotatedPrompt) -> str:
+    '''Render the annotation back as inline ``|label: text|`` markup.
+
+    Round-trips through `parse_annotated_prompt`: re-parsing the output
+    yields the same clean prompt and the same spans. Multi-label spans
+    serialize as ``|body,hair: text|``; plain runs are emitted verbatim
+    between the tags.
+
+    Args:
+        annotated: Parsed prompt from `parse_annotated_prompt`.
+
+    Returns:
+        Markup text that parses back to an equivalent annotation.
+    '''
+    return _tokens_to_markup(_structure_tokens(annotated))
+
+
+def edit_segment(
+    annotated: AnnotatedPrompt, label: str, mode: str, text: str
+) -> AnnotatedPrompt:
+    '''Edit one label's text inside the annotation.
+
+    `mode` picks the edit: ``prepend`` puts `text` before the label's
+    first fragment, ``append`` after its last one (comma-joined);
+    ``remove`` deletes the comma-separated tags listed in `text` from
+    every fragment of the label (exact match after trimming; removing
+    tags that are not present changes nothing and returns the input
+    object as-is). Editing the implicit `all` label edits the unmarked
+    common part in place — it stays unmarked. A span shared between
+    several labels (``|body,hair: text|``) holds one text, so edits to
+    any of its labels change that shared text for all of them; a span
+    emptied by ``remove`` disappears from the annotation.
+
+    Args:
+        annotated: Parsed prompt from `parse_annotated_prompt`.
+        label: Label whose text to edit.
+        mode: One of `EDIT_MODES`.
+        text: Tag(s) to add, or the comma-separated tags to remove.
+
+    Returns:
+        The re-parsed edited annotation (offsets recalculated).
+
+    Raises:
+        ValueError: On an unknown `mode`, blank `text`, or a label with
+            no content in the annotation.
+    '''
+    if mode not in EDIT_MODES:
+        raise ValueError(
+            f"Unknown edit mode {mode!r}; expected one of: "
+            f"{LABEL_LIST_SEPARATOR.join(EDIT_MODES)}"
+        )
+    text = text.strip()
+    if not text:
+        raise ValueError("Edit text must not be empty")
+
+    segments = annotated.segments_by_label()
+    if label not in segments:
+        raise ValueError(_unknown_label_message(label, segments))
+
+    tokens = _structure_tokens(annotated)
+    if mode == "remove":
+        removals = {
+            part.strip()
+            for part in text.split(LABELS_SEPARATOR)
+            if part.strip()
+        }
+        edited = [
+            _with_text(token, _remove_tags(token.text, removals))
+            if _carries(token, label)
+            else token
+            for token in tokens
+        ]
+        if _tokens_to_markup(edited) == _tokens_to_markup(tokens):
+            return annotated
+        tokens = edited
+    else:
+        targets = [
+            index
+            for index, token in enumerate(tokens)
+            if _carries(token, label) and token.text.strip(_SEPARATORS)
+        ]
+        index = targets[0] if mode == "prepend" else targets[-1]
+        tokens[index] = _with_text(
+            tokens[index], _insert_text(tokens[index].text, text, mode)
+        )
+    return parse_annotated_prompt(_tokens_to_markup(tokens))
