@@ -162,8 +162,9 @@ masterpiece, |body:1girl, thin|, |face:blue eyes, smirk|, |body,hair:red hair|, 
 **Web editor.** With the web assets loaded (they ship with the pack),
 the node's prompt field itself becomes a **rich input**: the markup is
 highlighted live while typing — `|label:` parts dimmed, span text in a
-stable pastel color per label (dark-theme friendly). The field grows
-with its content automatically. The built-in text widget is only
+stable pastel color per label (dark-theme friendly). The field fills the
+node's widget area and follows node resizes; typing past the available
+height grows the node. The built-in text widget is only
 hidden, so the value keeps serializing into the workflow normally. The
 **Annotate...** button opens a popup editor with the same
 live-highlighted input, larger, plus a palette of the labels already
