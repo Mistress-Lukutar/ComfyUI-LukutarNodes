@@ -72,8 +72,38 @@ mypy --explicit-package-bases core
 
 The pack is **not pip-installed**; it is cloned into `ComfyUI/custom_nodes`.
 `requirements.txt` carries only `opencv-python` — torch and numpy come
-from the ComfyUI runtime. The `[project]` table in `pyproject.toml` is
-metadata only; pytest/ruff/mypy config lives in its tool sections.
+from the ComfyUI runtime. The `[project]`/`[tool.comfy]` tables in
+`pyproject.toml` are registry + package metadata (no pip semantics);
+pytest/ruff/mypy config lives in its tool sections.
+
+## Releases (ComfyUI registry)
+
+Published by CI, never by hand. Pushing a `v*` tag (or pressing "Run
+workflow" in the Actions tab) makes `.github/workflows/publish_action.yml`
+run Comfy-Org/publish-node-action with the `REGISTRY_ACCESS_TOKEN` repo
+secret and publish the version written in `pyproject.toml` to the
+registry — publisher `mistress-lukutar`, node id `lukutar-nodes`
+(registry.comfy.org/publishers/mistress-lukutar).
+
+```bash
+# checks green first: pytest, ruff, mypy, smoke test (see Commands)
+# bump the version in BOTH __init__.py.__version__ and pyproject.toml
+git commit -m "chore(release): bump version to X.Y.Z"
+git tag vX.Y.Z
+git push origin main --tags
+```
+
+- Verify: `gh run list --workflow=publish_action.yml` (expect success),
+  then `curl -s https://api.comfy.org/nodes/lukutar-nodes/versions`
+  must list the new version.
+- A published version can never be republished — the registry answers
+  400 "The node version already exists". A forgotten bump = red run.
+- The registry node name (`lukutar-nodes` in `pyproject.toml`) is
+  immutable after the first publish; `DisplayName` is changeable.
+- The workflow deliberately does NOT fire on `pyproject.toml` edits:
+  the file changes for non-release reasons too. The tag is the release.
+- The package is every git-tracked file minus `.comfyignore` — when
+  adding dev-only files, extend `.comfyignore` so they don't ship.
 
 ## Import / pytest gotchas
 
@@ -103,4 +133,4 @@ metadata only; pytest/ruff/mypy config lives in its tool sections.
   the package `__init__` `__all__`.
 - Use module loggers (`logging.getLogger(__name__)`), not print.
 - Version is tracked in **both** `__init__.py.__version__` and
-  `pyproject.toml` — bump them together.
+  `pyproject.toml` — bump them together (release flow: see Releases).
