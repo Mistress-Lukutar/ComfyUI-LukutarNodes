@@ -3,7 +3,7 @@ File:   test_prompt_annotator.py
 Brief:  Unit tests for the inline prompt annotation markup engine.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.7.0
+Version: v0.7.1
 '''
 
 from __future__ import annotations
@@ -251,14 +251,18 @@ def test_edit_segment_all_label_interior_plain() -> None:
     assert segment_text(prepended, DEFAULT_LABEL) == "common, a, shared, b"
 
 
+def test_edit_segment_empty_text_is_noop() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    for mode in ("prepend", "append", "remove", "new"):
+        assert edit_segment(annotated, "face", mode, "   ") is annotated
+
+
 def test_edit_segment_errors() -> None:
     annotated = parse_annotated_prompt(_EXAMPLE)
     with pytest.raises(ValueError, match="available labels"):
         edit_segment(annotated, "paws", "prepend", "fur")
     with pytest.raises(ValueError, match="Unknown edit mode"):
         edit_segment(annotated, "face", "replace", "x")
-    with pytest.raises(ValueError, match="must not be empty"):
-        edit_segment(annotated, "face", "append", "   ")
 
 
 def test_edit_segment_new_mode() -> None:

@@ -310,10 +310,11 @@ Notes on the semantics:
   text for all of them; a span emptied by `remove` disappears from the
   annotation (and its labels from Annotation Labels / the wildcard).
 - Removing tags that are not present changes nothing — the annotation
-  passes through untouched.
-- Unknown labels, unknown modes, blank label lists and blank text
-  (except in `delete`) fail the node (unknown labels list the
-  available ones; `new` fails on labels that already exist).
+  passes through untouched. The same applies to **blank text** (except
+  in `delete`): the edit becomes a no-op.
+- Unknown labels, unknown modes and blank label lists fail the node
+  (unknown labels list the available ones; `new` fails on labels that
+  already exist).
 
 #### Inputs
 
@@ -322,7 +323,7 @@ Notes on the semantics:
 | annotations | ANNOTATIONS | — | Annotations from Prompt Annotate. |
 | label | STRING | face | Label(s) to edit, comma-separated for several; every mode applies to all of them. Unknown labels fail the node listing the available ones. |
 | mode | COMBO | prepend | `prepend` / `append` / `remove` / `new` / `delete` — see above. |
-| text | STRING | — | Tags to add, the comma-separated tags to remove, or the new span's text; unused in `delete` mode. |
+| text | STRING | — | Tags to add, the comma-separated tags to remove, or the new span's text; blank text = no edit; unused in `delete` mode. |
 
 #### Outputs
 

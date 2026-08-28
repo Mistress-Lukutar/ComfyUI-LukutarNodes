@@ -3,7 +3,7 @@ File:   prompt_annotator.py
 Brief:  Inline label-markup parser for region-wise prompt annotation.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.7.0
+Version: v0.7.1
 '''
 
 from __future__ import annotations
@@ -598,6 +598,9 @@ def edit_segment(
     edits to any of its labels change that shared text for all of them;
     a span emptied by ``remove`` disappears from the annotation.
 
+    Blank `text` (except in ``delete`` mode) makes the edit a no-op:
+    the input object is returned unchanged.
+
     Args:
         annotated: Parsed prompt from `parse_annotated_prompt`.
         labels: Comma-separated label list to apply the edit to.
@@ -610,15 +613,18 @@ def edit_segment(
 
     Raises:
         ValueError: On an unknown `mode`, an empty label list, an
-            invalid label name, blank `text` (except in ``delete``),
-            labels missing from the annotation (except in ``new``), or
-            labels already present in ``new`` mode.
+            invalid label name, labels missing from the annotation
+            (except in ``new``), or labels already present in ``new``
+            mode.
     '''
     if mode not in EDIT_MODES:
         raise ValueError(
             f"Unknown edit mode {mode!r}; expected one of: "
             f"{LABEL_LIST_SEPARATOR.join(EDIT_MODES)}"
         )
+    text = text.strip()
+    if not text and mode != "delete":
+        return annotated
     wanted = _parse_label_list(labels)
     segments = annotated.segments_by_label()
     if mode == "new":
@@ -633,9 +639,6 @@ def edit_segment(
         missing = [label for label in wanted if label not in segments]
         if missing:
             raise ValueError(_missing_labels_message(missing, segments))
-    text = text.strip()
-    if mode != "delete" and not text:
-        raise ValueError("Edit text must not be empty")
 
     if mode == "new":
         tag = (
