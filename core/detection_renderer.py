@@ -3,7 +3,7 @@ File:   detection_renderer.py
 Brief:  YOLO-style bbox/caption/mask overlay engine (numpy/OpenCV, RGB).
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.3.0
+Version: v0.3.1
 '''
 
 from __future__ import annotations
@@ -196,7 +196,9 @@ class DetectionRenderer:
             Annotated HWC RGB uint8 image of the same resolution.
         '''
         height, width = frame.shape[:2]
-        canvas = frame.astype(np.float32)
+        # cv2 draws only on interleaved C-layout arrays; frames derived
+        # from permuted (VAE-decoded) tensors arrive channel-planar.
+        canvas = np.array(frame, dtype=np.float32, order="C", copy=True)
         colors = self._label_colors(detections)
 
         if self._draw_masks and self._mask_alpha > 0.0:

@@ -3,7 +3,7 @@ File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.7.0
+Version: v0.7.1
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -232,6 +232,21 @@ def main() -> None:
     empty_result, _ = overlay_node.overlay(image, ((0, 0), []))
     _check_image_tensor(empty_result, image)
     assert torch.allclose(empty_result, image), "empty SEGS must not draw"
+
+    # VAE-decode style input: a BHWC permuted view is non-contiguous and
+    # used to break cv2 drawing on the overlay canvas.
+    bchw = image[0].permute(2, 0, 1).contiguous()[None]
+    permuted = bchw.permute(0, 2, 3, 1)
+    assert not permuted.is_contiguous(), "test tensor must be a permuted view"
+    perm_overlay, _ = overlay_node.overlay(permuted, _fake_segs())
+    _check_image_tensor(perm_overlay, image)
+    assert not torch.allclose(perm_overlay, permuted), (
+        "overlay must draw on permuted views"
+    )
+    perm_matched, _ = node.match_colors(
+        permuted, reference, auto_tune=False, sigma=15.0, method="reinhard"
+    )
+    _check_image_tensor(perm_matched, image)
 
     # SEGS set crop size node.
     assert "SegsSetCropSize" in mappings, "SegsSetCropSize not registered"
