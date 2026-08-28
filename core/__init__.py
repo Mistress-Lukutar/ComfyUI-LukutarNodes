@@ -2,8 +2,8 @@
 File:   __init__.py
 Brief:  Core processing engines for the LukutarNodes pack.
 Author: Mistress-Lukutar
-Date:   2026-08-24
-Version: v0.3.0
+Date:   2026-08-28
+Version: v0.4.0
 '''
 
 from __future__ import annotations
@@ -36,13 +36,27 @@ from .detection_renderer import (
     format_caption,
     scale_detections,
 )
+from .prompt_annotator import (
+    DEFAULT_LABEL,
+    IMPACT_ALL_KEY,
+    IMPACT_LAB_HEADER,
+    AnnotatedPrompt,
+    PromptAnnotateError,
+    PromptSpan,
+    parse_annotated_prompt,
+    segment_text,
+    to_impact_wildcard,
+)
 
 __all__ = [
     "COLOR_AUTO",
     "COLOR_MODES",
     "COLOR_SINGLE",
     "DEFAULT_EVAL_SIGMA",
+    "DEFAULT_LABEL",
     "EVAL_METRICS",
+    "IMPACT_ALL_KEY",
+    "IMPACT_LAB_HEADER",
     "LABEL_CONFIDENCE",
     "LABEL_FORMATS",
     "LABEL_TEXT",
@@ -52,14 +66,20 @@ __all__ = [
     "METHOD_REINHARD",
     "METHOD_REPLACE",
     "PALETTE",
+    "AnnotatedPrompt",
     "ColorMatchError",
     "ColorMatcher",
     "Detection",
     "DetectionRenderError",
     "DetectionRenderer",
     "FrequencySplit",
+    "PromptAnnotateError",
+    "PromptSpan",
     "TuneResult",
     "format_caption",
+    "parse_annotated_prompt",
     "scale_detections",
+    "segment_text",
+    "to_impact_wildcard",
     "tune_sigma",
 ]

@@ -2,8 +2,8 @@
 File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
-Date:   2026-08-24
-Version: v0.3.0
+Date:   2026-08-28
+Version: v0.5.0
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -176,6 +176,39 @@ def main() -> None:
     empty_result, _ = overlay_node.overlay(image, ((0, 0), []))
     _check_image_tensor(empty_result, image)
     assert torch.allclose(empty_result, image), "empty SEGS must not draw"
+
+    # Prompt annotation nodes.
+    assert "PromptAnnotate" in mappings, "PromptAnnotate not registered"
+    assert "AnnotationsWildcard" in mappings
+    assert "AnnotationSegment" in mappings
+    assert "PromptAnnotate" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+
+    annotate_node = mappings["PromptAnnotate"]()
+    annotations, clean_prompt = annotate_node.annotate(
+        "masterpiece, |body:1girl, thin|, |face:blue eyes, smirk|, "
+        "|body,hair:red hair|, |body:stands|, |background:outdoors, park|",
+    )
+    assert clean_prompt == (
+        "masterpiece, 1girl, thin, blue eyes, smirk, red hair, stands, "
+        "outdoors, park"
+    ), f"unexpected clean prompt: {clean_prompt!r}"
+
+    (wildcard,) = mappings["AnnotationsWildcard"]().convert(annotations)
+    assert wildcard.startswith("[LAB]"), "wildcard must start with [LAB]"
+    assert "[ALL] masterpiece," in wildcard
+    assert "[body] 1girl, thin, red hair, stands" in wildcard
+    assert "[hair] red hair" in wildcard
+
+    (face_text,) = mappings["AnnotationSegment"]().segment(
+        annotations, "face", include_common=True
+    )
+    assert face_text == "masterpiece, blue eyes, smirk"
+    try:
+        mappings["AnnotationSegment"]().segment(annotations, "paws")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown label must raise ValueError")
 
     print("SMOKE TEST PASSED: nodes load and behave as expected")
 

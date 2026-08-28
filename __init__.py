@@ -2,13 +2,16 @@
 File:   __init__.py
 Brief:  ComfyUI-LukutarNodes custom node pack entry point.
 Author: Mistress-Lukutar
-Date:   2026-08-24
-Version: v0.3.0
+Date:   2026-08-28
+Version: v0.5.1
 '''
 
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.5.1"
+
+#: Served to the ComfyUI frontend (prompt annotator popup editor).
+WEB_DIRECTORY = "./web"
 
 if __package__:
     # Normal case: imported as a package (ComfyUI's custom node loader,

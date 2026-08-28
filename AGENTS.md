@@ -1,13 +1,17 @@
 # AGENTS.md — ComfyUI-LukutarNodes
 
-ComfyUI custom node pack by Mistress-Lukutar. Two nodes:
+ComfyUI custom node pack by Mistress-Lukutar. Nodes:
 **Color Match (Frequency Split)** — restores a reference image's color
 distribution onto a processed image (e.g. an SD upscale) via Gaussian
-frequency separation — and **SEGS BBox Overlay** — draws Impact Pack
-SEGS detections on an image, YOLO-demo style. The nodes' behavioral
-contract (inputs, batch semantics, auto-tune, progress reporting) is
-specified in `README.md`; keep the README in sync with any behavior
-change.
+frequency separation; **SEGS BBox Overlay** — draws Impact Pack
+SEGS detections on an image, YOLO-demo style; and the prompt
+annotation trio — **Prompt Annotate** (inline `|label: text|` markup in
+one prompt, outputs ANNOTATIONS + clean STRING), **Annotations to
+Wildcard (LAB)** (converts ANNOTATIONS to Impact Pack `[LAB]`
+wildcard text) and **Annotation Segment** (extracts one label's text).
+The nodes' behavioral contract (inputs, batch semantics, auto-tune,
+progress reporting, markup grammar) is specified in `README.md`; keep
+the README in sync with any behavior change.
 
 ## Layout & architecture boundaries
 
@@ -18,7 +22,12 @@ change.
   bar). `comfy` imports must be lazy and guarded with
   `try: from comfy... except ImportError: return None` so the module
   imports outside the ComfyUI runtime (pattern: `_make_progress_bar` in
-  `nodes/color_match.py`).
+  `nodes/color_match.py`). The prompt-annotation nodes need neither
+  torch nor comfy and stay pure-string.
+- `web/js/` — frontend extension served via `WEB_DIRECTORY` in the root
+  `__init__.py` (rich highlighted input + popup editor for Prompt
+  Annotate). Vanilla ES module, no build step; the pack must stay fully
+  functional without it.
 - `utils/` — torch IMAGE-tensor ⇄ numpy frame conversion helpers
   (B,H,W,3 float [0,1] RGB ⇄ HWC float32 [0,255] RGB).
 - `tests/unit/` — engine tests, torch-free. `tests/smoke_test_comfyui_load.py`
@@ -26,7 +35,8 @@ change.
 
 Adding a node: engine in `core/`, node class in `nodes/`, then register
 it in `nodes/__init__.py` (`NODE_CLASS_MAPPINGS` +
-`NODE_DISPLAY_NAME_MAPPINGS`). ComfyUI menu category: `Lukutar/Image`.
+`NODE_DISPLAY_NAME_MAPPINGS`). ComfyUI menu categories: `Lukutar/Image`
+for image nodes, `Lukutar/Prompt` for the prompt-annotation nodes.
 
 ## Commands
 
