@@ -3,7 +3,7 @@ File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.6.0
+Version: v0.7.0
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -232,6 +232,40 @@ def main() -> None:
     empty_result, _ = overlay_node.overlay(image, ((0, 0), []))
     _check_image_tensor(empty_result, image)
     assert torch.allclose(empty_result, image), "empty SEGS must not draw"
+
+    # SEGS set crop size node.
+    assert "SegsSetCropSize" in mappings, "SegsSetCropSize not registered"
+    assert "SegsSetCropSize" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+
+    fit_node = mappings["SegsSetCropSize"]()
+    segs = _fake_segs()  # canvas 96x72, bbox (16,16,48,48), crop 48x48
+    (resized,) = fit_node.fit(segs, 64, 64)
+    assert resized[0] == (72, 96), "canvas size must be preserved"
+    seg = resized[1][0]
+    assert seg.crop_region == [0, 0, 64, 64], "64x64 centered on the bbox"
+    assert seg.bbox == [16.0, 16.0, 48.0, 48.0], "bbox must be untouched"
+    assert seg.cropped_mask.shape == (64, 64)
+    assert seg.cropped_mask.dtype == np.float32
+    assert seg.cropped_mask[20, 20] == 1.0, "mask must keep image coords"
+    assert seg.cropped_mask[4, 4] == 0.0, "added context must be zero"
+
+    # Target below the bbox size: grows to contain it (rounded to /8).
+    (grown,) = fit_node.fit(_fake_segs(), 24, 24)
+    assert grown[1][0].crop_region == [16, 16, 48, 48]
+
+    # Target above the canvas: clamped to the canvas size.
+    (clamped,) = fit_node.fit(_fake_segs(), 512, 512)
+    assert clamped[1][0].crop_region == [0, 0, 96, 72]
+
+    # aspect mode: 32x32 bbox scaled so the longer side is 64.
+    (aspect,) = fit_node.fit(_fake_segs(), 64, 64, mode="aspect")
+    region = aspect[1][0].crop_region
+    assert region[2] - region[0] == 64 and region[3] - region[1] == 64
+
+    # Empty SEGS passes through untouched.
+    empty_segs = ((0, 0), [])
+    (same_segs,) = fit_node.fit(empty_segs, 64, 64)
+    assert same_segs is empty_segs
 
     # Prompt annotation nodes.
     assert "PromptAnnotate" in mappings, "PromptAnnotate not registered"

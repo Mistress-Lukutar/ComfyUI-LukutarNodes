@@ -4,7 +4,11 @@ ComfyUI custom node pack by Mistress-Lukutar. Nodes:
 **Color Match (Frequency Split)** — restores a reference image's color
 distribution onto a processed image (e.g. an SD upscale) via Gaussian
 frequency separation; **SEGS BBox Overlay** — draws Impact Pack
-SEGS detections on an image, YOLO-demo style; and the prompt
+SEGS detections on an image, YOLO-demo style; **SEGS Set Crop Size** —
+refits each segment's crop region to an absolute target size (exact
+W×H or aspect-scaled to the target's longer side, rounded up to a
+multiple, bbox always contained, cropped mask re-cut/zero-padded); and
+the prompt
 annotation set — **Prompt Annotate** (inline `|label: text|` markup in
 one prompt, outputs ANNOTATIONS + clean STRING), **Annotations to
 Wildcard (LAB)** (converts ANNOTATIONS to Impact Pack `[LAB]`
