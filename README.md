@@ -30,6 +30,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **Set Variable / Get Variable** — named workflow variables: publish a
   value once, read it anywhere without dragging wires
   (`Lukutar/Variables`).
+- **Paste (Clipspace, Keep Mask)** — context-menu item for image upload
+  nodes: paste a clipspace image while keeping the node's painted mask
+  (frontend extension, no node).
 
 ### Color Match (Frequency Split)
 
@@ -443,6 +446,37 @@ by hand.
   (set → set → get reads the last) — that is a duplicate-name conflict.
 - Without the web extension, wire the Get's `value` input manually (Set
   output → Get input works fine headless).
+
+### Paste (Clipspace, Keep Mask)
+
+Not a node — a context-menu item the pack's web extension adds to
+image-upload nodes (`Load Image`, `Load Image (impact)`, anything with
+an `image_upload` input).
+
+ComfyUI stores a painted mask in the **alpha channel of the very file**
+the image widget points at; the stock `Paste (Clipspace)` swaps the
+file, and the mask dies with it. This item pastes the clipspace's
+selected image but re-bakes the current file's alpha (i.e. the mask)
+on top of it, uploading the combined PNG as a new input file — the
+same save flow the MaskEditor uses.
+
+#### Behaviour
+
+- The item appears in the node's context menu whenever the clipspace
+  holds an image. On the current ComfyUI frontend it sits in the
+  **Extensions** section at the bottom of the menu (next to other
+  packs' items); on the legacy frontend, directly in the node menu.
+- If the sizes differ, the mask is stretched to the new image's
+  dimensions.
+- If the current file has no mask (no alpha / fully opaque), the item
+  degrades to an ordinary clipspace paste — nothing is uploaded.
+- The pasted image's own alpha (if any) is discarded; only the node's
+  existing mask is kept.
+- The combined PNG is encoded straight from the RGBA buffer, so RGB
+  under semi-transparent mask areas is preserved bit-exactly (a plain
+  canvas re-encode would black it out).
+- Requires no backend node — with the extension disabled everything
+  keeps working, the stock paste behaviour is unchanged.
 
 ## Installation
 

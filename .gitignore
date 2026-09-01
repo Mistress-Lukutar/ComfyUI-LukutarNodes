@@ -7,3 +7,5 @@ __pycache__/
 .idea/
 .zcode/
 node.zip
+# Scratch dumps from frontend source inspection
+.tmp_*

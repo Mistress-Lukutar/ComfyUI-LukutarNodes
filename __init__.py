@@ -11,7 +11,7 @@ from __future__ import annotations
 __version__ = "0.10.1"
 
 #: Served to the ComfyUI frontend (prompt annotator popup editor,
-#: Set/Get Variable invisible links).
+#: Set/Get Variable invisible links, Paste-Keep-Mask context-menu item).
 WEB_DIRECTORY = "./web"
 
 if __package__:
