@@ -40,9 +40,11 @@ the README in sync with any behavior change.
   and stay pure-python.
 - `web/js/` — frontend extensions served via `WEB_DIRECTORY` in the root
   `__init__.py` (rich highlighted input + popup editor for Prompt
-  Annotate; invisible Set/Get Variable auto-connection). Vanilla ES
-  modules, no build step; the pack must stay fully functional without
-  them (for Set/Get that means wiring the value input manually).
+  Annotate; invisible Set/Get Variable auto-connection; "Paste
+  (Clipspace, Keep Mask)" context-menu item that re-bakes the current
+  file's alpha-mask onto a pasted clipspace image, see README). Vanilla
+  ES modules, no build step; the pack must stay fully functional
+  without them (for Set/Get that means wiring the value input manually).
 - `utils/` — torch IMAGE-tensor ⇄ numpy frame conversion helpers
   (B,H,W,3 float [0,1] RGB ⇄ HWC float32 [0,255] RGB).
 - `tests/unit/` — engine tests, torch-free. `tests/smoke_test_comfyui_load.py`
