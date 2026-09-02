@@ -242,7 +242,11 @@ height grows the node. The built-in text widget is only
 hidden, so the value keeps serializing into the workflow normally. The
 **Annotate...** button opens a popup editor with the same
 live-highlighted input, larger, plus a palette of the labels already
-used in the text — click one to wrap the current selection. The node
+used in the text — click one to wrap the current selection. Standard
+ComfyUI text shortcuts work in both inputs: Ctrl+Enter queues the
+workflow (in the popup it saves the editor instead) and Ctrl+Up/Down
+adjusts attention weight around the caret; a wheel the field cannot
+use for its own scrolling zooms the canvas underneath. The node
 works without the web assets too — the markup is plain text and can be
 typed by hand.
 
