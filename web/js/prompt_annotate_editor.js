@@ -3,8 +3,8 @@
  * Brief:  Rich highlighted input + popup editor for Prompt Annotate and
  *         mode-aware widget states for Annotation Segment Edit.
  * Author: Mistress-Lukutar
- * Date:   2026-08-28
- * Version: v0.8.0
+ * Date:   2026-09-01
+ * Version: v0.11.0
  *
  * The node's own prompt field is replaced with a "rich input": a
  * transparent-text textarea stacked over a colored backdrop div with
@@ -29,6 +29,13 @@
  *  - the backdrop is sized to the textarea's clientWidth/clientHeight
  *    (excluding the scrollbar) and re-synced on resize;
  *  - both share font, line-height, padding, wrap and box-sizing.
+ *
+ * Input follows the canvas conventions: keydowns keep bubbling so
+ * ComfyUI's global textarea-aware shortcuts work in the field
+ * (Ctrl+Enter queues, Ctrl+Up/Down adjusts attention weight), and a
+ * wheel the field cannot consume by scrolling its own overflow is
+ * re-dispatched on the graph canvas (DOM widgets otherwise swallow
+ * wheels — canvas zoom is bound to the canvas element itself).
  *
  * Served at /extensions/<pack>/js/prompt_annotate_editor.js, hence the
  * THREE parent hops to reach /scripts/app.js (two hops would resolve
@@ -225,6 +232,30 @@ function createRichInput({
     onInput?.(textarea.value);
   });
   textarea.addEventListener("scroll", syncScroll);
+  // Consume a wheel only while the field can scroll its own overflow in
+  // that direction; anything else is re-dispatched on the graph canvas,
+  // so hovering the panel still zooms/pans the canvas. Without this the
+  // DOM widget would swallow the wheel — ComfyUI core does not forward
+  // wheels out of DOM widgets either (markdown previews behave the
+  // same).
+  textarea.addEventListener(
+    "wheel",
+    (event) => {
+      if (event.deltaY !== 0) {
+        const overflow = textarea.scrollHeight - textarea.clientHeight;
+        if (overflow > 0.5) {
+          const atTop = textarea.scrollTop <= 0;
+          const atBottom = textarea.scrollTop >= overflow - 0.5;
+          const canScroll = event.deltaY < 0 ? !atTop : !atBottom;
+          if (canScroll) return;
+        }
+      }
+      event.preventDefault();
+      const canvas = app.canvas?.canvas;
+      if (canvas) canvas.dispatchEvent(new WheelEvent("wheel", event));
+    },
+    { passive: false },
+  );
   if (typeof ResizeObserver !== "undefined") {
     new ResizeObserver(() => {
       syncSize();
@@ -356,12 +387,15 @@ function attachRichInputWidget(node) {
     },
   });
 
-  // Interacting with the input must not drag the node or fire canvas
-  // keyboard shortcuts.
+  // Interacting with the input must not drag the node. Keydowns must
+  // NOT be stopped: ComfyUI's global handlers listen on window and are
+  // textarea-aware (Ctrl+Enter queues, Ctrl+Up/Down adjusts attention
+  // weight); stopping them here is what used to disable those in this
+  // field. Canvas shortcuts still cannot misfire — the global keybinding
+  // service ignores text-input-reserved combos targeted at a textarea,
+  // and litegraph's key handler only receives events that target the
+  // canvas element itself.
   rich.wrapper.addEventListener("mousedown", (event) =>
-    event.stopPropagation(),
-  );
-  rich.textarea.addEventListener("keydown", (event) =>
     event.stopPropagation(),
   );
 
@@ -458,12 +492,15 @@ function openEditor(node) {
     }
   });
   rich.textarea.addEventListener("keydown", (event) => {
-    // Keep canvas shortcuts out; handle Esc/Ctrl+Enter locally since
-    // stopPropagation blocks bubbling to the panel.
-    event.stopPropagation();
+    // Esc and Ctrl+Enter are owned by the editor (close / save — the
+    // latter must not reach the global queue shortcut). Everything
+    // else keeps bubbling so ComfyUI's textarea-aware shortcuts still
+    // work here (e.g. Ctrl+Up/Down attention weight).
     if (event.key === "Escape") {
+      event.stopPropagation();
       close();
     } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.stopPropagation();
       event.preventDefault();
       save();
     }
