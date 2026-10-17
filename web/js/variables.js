@@ -47,18 +47,18 @@ const GET_NAME = "GetVariable";
 const NAME_WIDGET = "var_name";
 const VALUE_INPUT = "value";
 /** Flag on managed link objects; not serialized — re-tagged after load. */
-const LINK_FLAG = "lukutarVariable";
+export const LINK_FLAG = "lukutarVariable";
 /** LiteGraph.NEVER — ComfyUI "mute"; such nodes never reach the prompt. */
-const MODE_NEVER = 2;
+export const MODE_NEVER = 2;
 /** LiteGraph.BYPASS — ComfyUI "bypass"; serialized away too. */
-const MODE_BYPASS = 4;
+export const MODE_BYPASS = 4;
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
 /* ------------------------------------------------------------------ */
 
 /** Read a link by id across litegraph versions (Map or object _links). */
-function getLink(graph, linkId) {
+export function getLink(graph, linkId) {
   if (linkId == null || !graph) return null;
   if (graph.getLink) return graph.getLink(linkId);
   if (graph._links instanceof Map) return graph._links.get(linkId) ?? null;
@@ -72,7 +72,7 @@ function varNameOf(node) {
 }
 
 /** Active = not muted and not bypassed. */
-function isActive(node) {
+export function isActive(node) {
   return node.mode !== MODE_NEVER && node.mode !== MODE_BYPASS;
 }
 
@@ -99,10 +99,10 @@ function setTitle(node, title) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Link management                                                     */
+/* Link management (shared with bundle_variables.js)                   */
 /* ------------------------------------------------------------------ */
 
-function tagManaged(link) {
+export function tagManaged(link) {
   link[LINK_FLAG] = true;
   // Belt and suspenders with the renderLink patch: an alpha-only color
   // keeps the link invisible even if the patch ever stops applying.
@@ -226,7 +226,7 @@ function scheduleSync() {
 /* Rendering: managed links stay invisible                             */
 /* ------------------------------------------------------------------ */
 
-function patchLinkRendering() {
+export function patchLinkRendering() {
   const proto =
     typeof LGraphCanvas !== "undefined"
       ? LGraphCanvas.prototype

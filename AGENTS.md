@@ -21,7 +21,21 @@ comma-separated multi-label input); and the workflow-variable pair
 read it anywhere; `web/js/variables.js` maintains an invisible real
 link between the pair — real so ordering/caching/API export are
 ComfyUI's own; name resolution is mute-aware: several Sets may share a
-name across alternative branches, one active); and **Group Switch** —
+name across alternative branches, one active); and the bundle pair
+**Set Bundle** / **Get Bundle** (one named bundle of several typed
+slots — model, vae, clip…; `nodes/bundle_variables.py` receives slot
+links via `**kwargs` because ComfyUI validates only declared inputs,
+and pads its `*`-typed returns to MAX_SLOTS=16; `web/js/bundle_variables.js`
+grows SEGS-Concat-style slots — one free `+ add` input, connecting
+fixes type/auto-name and spawns the next, auto-named slots collapse on
+disconnect, renamed ones survive — mirrors slots to same-named
+outputs, links invisible real per-slot wires to Gets, and syncs the
+serialized but UI-hidden `slots` widget (`name:TYPE,...`) the backends
+use for loud per-slot errors; in current frontends EVERY widget is an
+entry in `node.inputs` (field `widget`) — slot logic must filter those
+out and never remove them; the pair needs the web extension to be
+wirable (hand-written API prompts may pass slot links, ordered by the
+`slots` spec or natural slot_N order)); and **Group Switch** —
 a panel node with one boolean row per canvas group that switches whole
 groups on/off, bypass or mute (`web/js/group_switch.js` grows, reorders
 and removes the rows as groups change, applies the same node modes as
@@ -51,13 +65,15 @@ the README in sync with any behavior change.
   and stay pure-python.
 - `web/js/` — frontend extensions served via `WEB_DIRECTORY` in the root
   `__init__.py` (rich highlighted input + popup editor for Prompt
-  Annotate; invisible Set/Get Variable auto-connection; Group Switch
+  Annotate; invisible Set/Get Variable auto-connection; Set/Get Bundle
+  slot growth + invisible per-slot links; Group Switch
   dynamic group rows; "Paste (Clipspace, Keep Mask)" context-menu item
   that re-bakes the current file's alpha-mask onto a pasted clipspace
   image, see README). Vanilla ES modules, no build step; the pack must
   stay fully functional without them (for Set/Get that means wiring the
-  value input manually; for Group Switch, setting the `group_states`
-  JSON by hand).
+  value input manually; for Set/Get Bundle, hand-wiring the
+  slot_1..slot_16 fallback bus; for Group Switch, setting the
+  `group_states` JSON by hand).
 - `utils/` — torch IMAGE-tensor ⇄ numpy frame conversion helpers
   (B,H,W,3 float [0,1] RGB ⇄ HWC float32 [0,255] RGB).
 - `tests/unit/` — engine tests, torch-free. `tests/smoke_test_comfyui_load.py`

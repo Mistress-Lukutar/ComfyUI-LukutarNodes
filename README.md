@@ -30,6 +30,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **Set Variable / Get Variable** — named workflow variables: publish a
   value once, read it anywhere without dragging wires
   (`Lukutar/Variables`).
+- **Set Bundle / Get Bundle** — a named bundle of several typed values
+  (model + vae + clip + …): grow slots by wiring, read the whole bundle
+  anywhere (`Lukutar/Variables`).
 - **Group Switch** — one boolean row per canvas group: switch whole
   groups on/off (bypass or mute) from a single panel node
   (`Lukutar/Groups`).
@@ -459,6 +462,96 @@ by hand.
   (set → set → get reads the last) — that is a duplicate-name conflict.
 - Without the web extension, wire the Get's `value` input manually (Set
   output → Get input works fine headless).
+
+### Set Bundle / Get Bundle
+
+A bundle is one named bag holding **several heterogeneously typed
+values** — e.g. a model, its VAE and its CLIP under a single name like
+`sdxl` — published once and readable anywhere (`Lukutar/Variables`).
+The single-value Set/Get Variable pair above stays the right tool for
+one value; the bundle pair is for moving a whole "kit" of nodes across
+the graph in one go.
+
+Slots grow **SEGS-Concat style** (Impact Pack): a Set Bundle always
+shows one free `+ add` input. Dropping a wire onto it fixes that
+slot's type to the source (MODEL, VAE, CLIP, IMAGE, anything — any
+custom type included) and auto-names it from the type (`model`, `vae`,
+`clip`, `model_2`…), then the next free input appears. Disconnecting an
+auto-named slot collapses it again. The node menu offers more:
+
+- **Rename slot "…"** — give the slot a meaningful name (e.g.
+  `sdxl_model`); renamed slots survive disconnects, so a custom name
+  is never lost by accident. Names must be unique, may not contain
+  commas/semicolons/colons and may not be `bundle_name`, `slots` or
+  `slot_<n>` (reserved).
+- **Remove slot "…"** — explicit removal.
+- **Add slot ▸** — pre-create an unconnected slot of a chosen type
+  (for wiring later; the type list there is fixed, wires accept any
+  type).
+
+Every named slot is mirrored to an output of the same name, so the Set
+node is a real bus: the wires source → Set → Get → consumer are all
+real links, and execution order, caching and API export stay ComfyUI's
+own — same principle as the variable pair. A Get Bundle resolves its
+`bundle_name` against the active Set Bundles and mirrors the Set's
+slots: one named input (the anchor of an invisible real link per slot)
+and one typed output per slot, appearing/vanishing as the Set's slots
+change. A manual wire into a Get input overrides the name. Titles show
+the state: `Set Bundle · sdxl (3)`, `Get Bundle · sdxl (3)`, plus ⚠
+warnings (`duplicate`, `no active Set`, `unconnected: vae`).
+
+Both nodes carry a `slots` widget — the spec (`model:MODEL,vae:VAE,…`)
+the extension keeps in sync. It is hidden from the UI (internal state;
+the sockets themselves are the interface) but serialized into the
+workflow and API export; the backends read it for loud per-slot errors
+at queue time (a declared but unwired slot fails with
+`Set Bundle [sdxl]: slot(s) not connected: vae` instead of a cryptic
+None downstream).
+
+#### Set Bundle — Inputs / Outputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| bundle_name | STRING | — | Bundle name, e.g. `sdxl`; Get Bundle nodes with this name receive all slots. |
+| slots | STRING | — | Hidden spec, managed automatically; do not edit. |
+| *(slots)* | any | — | One input per slot, added by wiring or the node menu. |
+
+| Name | Type | Description |
+|------|------|-------------|
+| *(slots)* | any | One output per slot, mirroring the inputs by name. |
+
+#### Get Bundle — Inputs / Outputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| bundle_name | STRING | — | Bundle name to read, e.g. `sdxl`. |
+| slots | STRING | — | Hidden spec mirror; updated automatically from the Set side. |
+| *(slots)* | any | — | One input per slot, connected by invisible links; manual wires win. |
+
+| Name | Type | Description |
+|------|------|-------------|
+| *(slots)* | any | One output per slot, with the slot's type. |
+
+#### Rules
+
+- The same duplicate-name rules as the variable pair apply: several Set
+  Bundles may share one name on alternative branches, but two
+  simultaneously active Sets with one name leave Gets unlinked (⚠) and
+  fail the queue. A Get follows the spec of the single active Set —
+  branches with different slot specs reshape every linked Get on
+  switch, dropping its wiring, so keep the specs identical across
+  branches.
+- Slot values flow in spec order; renaming a slot renames it on every
+  linked Get. Removing a slot removes the matching Get sockets; wires
+  hanging on removed outputs are dropped (re-plug them).
+- A bundle holds at most 16 slots.
+- The bundle pair needs the web extension: every socket is grown and
+  linked by it, so without the web assets the nodes cannot be wired
+  from the UI (use the single-value Set/Get Variable pair instead).
+  Hand-written API prompts work regardless — pass the slot links under
+  their names and order them via the `slots` spec, or omit the spec
+  and name the links `slot_1..slot_16` (values then pass through in
+  natural name order).
 
 ### Group Switch
 

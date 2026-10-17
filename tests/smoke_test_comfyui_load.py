@@ -160,6 +160,78 @@ def _validate_variables_prompt(mappings: dict[str, type]) -> None:
         sys.path.remove(str(COMFYUI_ROOT))
 
 
+def _validate_bundle_prompt(mappings: dict[str, type]) -> None:
+    '''Validate the bundle bus prompt the web extension serializes.
+
+    The slot links (image, latent) are NOT declared in the bundle
+    nodes' INPUT_TYPES — ComfyUI's validator only inspects declared
+    inputs while the executor resolves every linked prompt input, which
+    is the contract that lets the web extension grow sockets
+    client-side. Running the shaped prompt through the real validator
+    proves that contract holds end to end, heterogeneous slots
+    included.
+    '''
+    if not COMFYUI_ROOT.exists():
+        print("NOTE: ComfyUI root not found, skipping prompt validation e2e")
+        return
+    sys.path.insert(0, str(COMFYUI_ROOT))
+    try:
+        import asyncio
+
+        import execution
+
+        import nodes as comfy_nodes
+
+        for key in ("SetBundle", "GetBundle"):
+            comfy_nodes.NODE_CLASS_MAPPINGS[key] = mappings[key]
+
+        spec = "image:IMAGE,latent:LATENT"
+        prompt = {
+            "1": {
+                "class_type": "EmptyImage",
+                "inputs": {
+                    "width": 8,
+                    "height": 8,
+                    "batch_size": 1,
+                    "color": 0,
+                },
+            },
+            "2": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 8, "height": 8, "batch_size": 1},
+            },
+            "3": {
+                "class_type": "SetBundle",
+                "inputs": {
+                    "bundle_name": "sdxl",
+                    "slots": spec,
+                    "image": ["1", 0],
+                    "latent": ["2", 0],
+                },
+            },
+            "4": {
+                "class_type": "GetBundle",
+                "inputs": {
+                    "bundle_name": "sdxl",
+                    "slots": spec,
+                    "image": ["3", 0],
+                    "latent": ["3", 1],
+                },
+            },
+            "5": {
+                "class_type": "PreviewImage",
+                "inputs": {"images": ["4", 0]},
+            },
+        }
+        ok, error, outputs, _node_errors = asyncio.run(
+            execution.validate_prompt("lukutar-smoke", prompt, None)
+        )
+        assert ok, f"bundle prompt failed validation: {error}"
+        assert outputs == ["5"], f"unexpected outputs: {outputs}"
+    finally:
+        sys.path.remove(str(COMFYUI_ROOT))
+
+
 def main() -> None:
     pack = load_pack()
     mappings = getattr(pack, "NODE_CLASS_MAPPINGS", None)
@@ -394,6 +466,45 @@ def main() -> None:
         raise AssertionError("blank variable name must raise ValueError")
 
     _validate_variables_prompt(mappings)
+
+    # Bundle nodes: multi-slot named bus. Direct contract checks, then
+    # the web-extension-shaped prompt through ComfyUI's validator.
+    assert "SetBundle" in mappings, "SetBundle not registered"
+    assert "GetBundle" in mappings, "GetBundle not registered"
+    assert "SetBundle" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+    assert "GetBundle" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+
+    image_marker, seed_marker = object(), object()
+    bundle_set = mappings["SetBundle"]()
+    slots_out = bundle_set.set_bundle(
+        "sdxl", "image:IMAGE, seed:INT", seed=seed_marker, image=image_marker
+    )
+    assert slots_out[:2] == (image_marker, seed_marker), (
+        "slots must pass through in spec order"
+    )
+    assert all(value is None for value in slots_out[2:]), (
+        "padding beyond the spec must be None"
+    )
+    try:
+        bundle_set.set_bundle("sdxl", "image:IMAGE,seed:INT", image=image_marker)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("missing declared slot must raise RuntimeError")
+    try:
+        mappings["GetBundle"]().get_bundle("sdxl")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("valueless GetBundle must raise RuntimeError")
+    try:
+        bundle_set.set_bundle("sdxl", "image:IMAGE,image:VAE", image=image_marker)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("duplicate slot names must raise ValueError")
+
+    _validate_bundle_prompt(mappings)
 
     # Group Switch node: validate + order the states payload the way the
     # web extension serializes it, then prove the prompt contract end to
