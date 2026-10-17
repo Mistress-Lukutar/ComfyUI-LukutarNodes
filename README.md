@@ -244,15 +244,18 @@ the node's prompt field itself becomes a **rich input**: the markup is
 highlighted live while typing — `|label:` parts dimmed, span text in a
 stable pastel color per label (dark-theme friendly). The field fills the
 node's widget area and follows node resizes; typing past the available
-height grows the node. The built-in text widget is only
+height grows the node, but only up to a 400 px cap — past it the field
+stops growing and scrolls instead. The mouse wheel scrolls the field
+while it has somewhere to scroll; once the field is at its top/bottom
+edge (or has no overflow at all) the wheel zooms the canvas underneath.
+The built-in text widget is only
 hidden, so the value keeps serializing into the workflow normally. The
 **Annotate...** button opens a popup editor with the same
 live-highlighted input, larger, plus a palette of the labels already
 used in the text — click one to wrap the current selection. Standard
 ComfyUI text shortcuts work in both inputs: Ctrl+Enter queues the
 workflow (in the popup it saves the editor instead) and Ctrl+Up/Down
-adjusts attention weight around the caret; a wheel the field cannot
-use for its own scrolling zooms the canvas underneath. The node
+adjusts attention weight around the caret. The node
 works without the web assets too — the markup is plain text and can be
 typed by hand.
 

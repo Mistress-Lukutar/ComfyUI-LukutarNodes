@@ -4,7 +4,7 @@
  *         mode-aware widget states for Annotation Segment Edit.
  * Author: Mistress-Lukutar
  * Date:   2026-09-01
- * Version: v0.11.0
+ * Version: v0.11.1
  *
  * The node's own prompt field is replaced with a "rich input": a
  * transparent-text textarea stacked over a colored backdrop div with
@@ -20,7 +20,10 @@
  * 60vh); the in-node input is a FILL widget — the node layout owns its
  * height (it stretches with the node; the minimum is declared to the
  * layout engine via --comfy-widget-min-height) and typing past the
- * available height grows the node instead of scrolling.
+ * available height grows the node — but only up to MAX_FIELD_HEIGHT.
+ * Past the cap the field stops growing and scrolls instead, and the
+ * wheel scrolls the field while it can, zooming the canvas once the
+ * field hits the top/bottom edge (or has no overflow at all).
  *
  * Alignment rules that keep the caret glued to the highlight:
  *  - the backdrop carries NO horizontal padding/border widths that the
@@ -48,6 +51,15 @@ console.info("[LukutarNodes] prompt annotate editor extension loaded");
 
 const NODE_NAME = "PromptAnnotate";
 const TEXT_WIDGET = "text";
+
+/**
+ * Auto-growth cap for the in-node field, in px (~25 lines at the
+ * 11px/1.45 field font). Typing grows the node only until the field
+ * reaches this height; past it the field scrolls instead of the node
+ * stretching indefinitely. A manually enlarged node still fills (the
+ * fill behavior is untouched — only auto-growth is capped).
+ */
+const MAX_FIELD_HEIGHT = 400;
 
 /** Matches |labels: text| tags the same way core/prompt_annotator.py does. */
 const TAG_RE = /\|([^:|\n]+):([^|\n]*)\|/g;
@@ -161,7 +173,8 @@ function renderRawMarkup(container, text) {
  *   the height is owned by the node layout and the textarea fills it.
  * @param {Function} options.onOverflow Fill mode only: called with the
  *   pixel shortfall when the content no longer fits the field, so the
- *   host can grow the node.
+ *   host can grow the node (the host decides how much — it caps the
+ *   growth so the field scrolls past MAX_FIELD_HEIGHT).
  */
 function createRichInput({
   value = "",
@@ -306,12 +319,13 @@ const STYLE = `
 /* Compact variant used inside the node body: a FILL widget. ComfyUI
    stretches the wrapper to the DOM-widget area (computedHeight minus
    2x10px margin), the textarea flexes to fill the wrapper — no inline
-   height, no caps. --comfy-widget-min-height declares the widget's
-   layout minimum to the node layout engine (104px = ~84px field +
-   the 2x10px margin); no max, so the widget takes all free space and
-   follows node resizes. Content past the available height grows the
-   node (onOverflow) — the scrollbar only shows when the node is
-   deliberately smaller than the text. */
+   height. --comfy-widget-min-height declares the widget's layout
+   minimum to the node layout engine (104px = ~84px field + the 2x10px
+   margin); no CSS max — auto-growth is capped in JS (onOverflow stops
+   at MAX_FIELD_HEIGHT, the field then scrolls), while a manually
+   enlarged node still fills all the way. Content past the available
+   height grows the node (onOverflow) — the scrollbar only shows at the
+   cap or when the node is deliberately smaller than the text. */
 .lk-rich.lk-node-rich { display: flex; flex-direction: column;
   --comfy-widget-min-height: 104px; }
 .lk-rich.lk-node-rich > textarea,
@@ -382,7 +396,13 @@ function attachRichInputWidget(node) {
     onOverflow: (deficit) => {
       // Content no longer fits the widget area: grow the node (native
       // multiline-widget behavior) — the rich input keeps filling it.
-      node.setSize([node.size[0], node.size[1] + deficit]);
+      // Only up to MAX_FIELD_HEIGHT though: past the cap the field
+      // stops growing and scrolls, so the wheel handler's "scroll the
+      // field / zoom the canvas at the edges" policy can engage.
+      const room = Math.max(0, MAX_FIELD_HEIGHT - rich.textarea.clientHeight);
+      const grow = Math.min(deficit, room);
+      if (grow <= 0) return;
+      node.setSize([node.size[0], node.size[1] + grow]);
       node.setDirtyCanvas(true, true);
     },
   });
