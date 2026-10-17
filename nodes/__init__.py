@@ -9,6 +9,7 @@ Version: v0.8.0
 from __future__ import annotations
 
 from .color_match import ColorMatchNode
+from .group_switch import GroupSwitchNode
 from .prompt_annotate import (
     AnnotationLabelsNode,
     AnnotationSegmentEditNode,
@@ -16,12 +17,14 @@ from .prompt_annotate import (
     AnnotationsWildcardNode,
     PromptAnnotateNode,
 )
+from .seed_history import SeedHistoryNode
 from .segs_overlay import SegsOverlayNode
 from .segs_set_crop_size import SegsSetCropSizeNode
 from .variables import GetVariableNode, SetVariableNode
 
 NODE_CLASS_MAPPINGS: dict[str, type] = {
     "ColorMatch": ColorMatchNode,
+    "GroupSwitch": GroupSwitchNode,
     "SegsOverlay": SegsOverlayNode,
     "SegsSetCropSize": SegsSetCropSizeNode,
     "PromptAnnotate": PromptAnnotateNode,
@@ -29,12 +32,14 @@ NODE_CLASS_MAPPINGS: dict[str, type] = {
     "AnnotationSegment": AnnotationSegmentNode,
     "AnnotationLabels": AnnotationLabelsNode,
     "AnnotationSegmentEdit": AnnotationSegmentEditNode,
+    "SeedHistory": SeedHistoryNode,
     "SetVariable": SetVariableNode,
     "GetVariable": GetVariableNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
     "ColorMatch": "Color Match (Frequency Split)",
+    "GroupSwitch": "Group Switch",
     "SegsOverlay": "SEGS BBox Overlay",
     "SegsSetCropSize": "SEGS Set Crop Size",
     "PromptAnnotate": "Prompt Annotate",
@@ -42,6 +47,7 @@ NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
     "AnnotationSegment": "Annotation Segment",
     "AnnotationLabels": "Annotation Labels",
     "AnnotationSegmentEdit": "Annotation Segment Edit",
+    "SeedHistory": "Seed History",
     "SetVariable": "Set Variable",
     "GetVariable": "Get Variable",
 }
@@ -53,7 +59,9 @@ __all__ = [
     "AnnotationsWildcardNode",
     "ColorMatchNode",
     "GetVariableNode",
+    "GroupSwitchNode",
     "PromptAnnotateNode",
+    "SeedHistoryNode",
     "SegsOverlayNode",
     "SegsSetCropSizeNode",
     "SetVariableNode",

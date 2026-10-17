@@ -21,7 +21,18 @@ comma-separated multi-label input); and the workflow-variable pair
 read it anywhere; `web/js/variables.js` maintains an invisible real
 link between the pair — real so ordering/caching/API export are
 ComfyUI's own; name resolution is mute-aware: several Sets may share a
-name across alternative branches, one active).
+name across alternative branches, one active); and **Group Switch** —
+a panel node with one boolean row per canvas group that switches whole
+groups on/off, bypass or mute (`web/js/group_switch.js` grows, reorders
+and removes the rows as groups change, applies the same node modes as
+the native group menu, optionally recolors the group frame, and mirrors
+the states into the hidden `group_states` JSON widget that the backend
+republishes as the single GROUP_STATES output); and **Seed History** —
+a zero-input seed generator with the same ``seed`` +
+``control_after_generate`` parameters as the built-in Seed node, plus a
+``history_size`` parameter (default 5) that keeps a rolling log of past
+seeds rendered as copyable text below all other parameters via
+`web/js/seed_history.js`.
 The nodes' behavioral contract (inputs, batch semantics, auto-tune,
 progress reporting, markup grammar) is specified in `README.md`; keep
 the README in sync with any behavior change.
@@ -40,11 +51,13 @@ the README in sync with any behavior change.
   and stay pure-python.
 - `web/js/` — frontend extensions served via `WEB_DIRECTORY` in the root
   `__init__.py` (rich highlighted input + popup editor for Prompt
-  Annotate; invisible Set/Get Variable auto-connection; "Paste
-  (Clipspace, Keep Mask)" context-menu item that re-bakes the current
-  file's alpha-mask onto a pasted clipspace image, see README). Vanilla
-  ES modules, no build step; the pack must stay fully functional
-  without them (for Set/Get that means wiring the value input manually).
+  Annotate; invisible Set/Get Variable auto-connection; Group Switch
+  dynamic group rows; "Paste (Clipspace, Keep Mask)" context-menu item
+  that re-bakes the current file's alpha-mask onto a pasted clipspace
+  image, see README). Vanilla ES modules, no build step; the pack must
+  stay fully functional without them (for Set/Get that means wiring the
+  value input manually; for Group Switch, setting the `group_states`
+  JSON by hand).
 - `utils/` — torch IMAGE-tensor ⇄ numpy frame conversion helpers
   (B,H,W,3 float [0,1] RGB ⇄ HWC float32 [0,255] RGB).
 - `tests/unit/` — engine tests, torch-free. `tests/smoke_test_comfyui_load.py`
@@ -54,7 +67,8 @@ Adding a node: engine in `core/`, node class in `nodes/`, then register
 it in `nodes/__init__.py` (`NODE_CLASS_MAPPINGS` +
 `NODE_DISPLAY_NAME_MAPPINGS`). ComfyUI menu categories: `Lukutar/Image`
 for image nodes, `Lukutar/Prompt` for the prompt-annotation nodes,
-`Lukutar/Variables` for the variable pair.
+`Lukutar/Variables` for the variable pair, `Lukutar/Groups` for the
+Group Switch, `Lukutar/Seeds` for seed-related nodes.
 
 ## Commands
 

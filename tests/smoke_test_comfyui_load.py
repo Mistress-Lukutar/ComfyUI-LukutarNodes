@@ -395,6 +395,129 @@ def main() -> None:
 
     _validate_variables_prompt(mappings)
 
+    # Group Switch node: validate + order the states payload the way the
+    # web extension serializes it, then prove the prompt contract end to
+    # end (GROUP_STATES output feeds the wildcard Set/Get value input).
+    assert "GroupSwitch" in mappings, "GroupSwitch not registered"
+    assert "GroupSwitch" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+
+    switch_node = mappings["GroupSwitch"]()
+    (states,) = switch_node.switch(
+        "bypass", True, "b,c", '{"b": true, "a": false, "c": true}'
+    )
+    assert list(states) == ["b", "c", "a"], f"unexpected order: {list(states)}"
+    assert states == {"b": True, "c": True, "a": False}
+    (empty_states,) = switch_node.switch("disable", False, "", "{}")
+    assert empty_states == {}
+    try:
+        switch_node.switch("mute", True, "", "{}")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown disable method must raise ValueError")
+    try:
+        switch_node.switch("bypass", True, "", "{broken")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("broken group_states JSON must raise ValueError")
+
+    if COMFYUI_ROOT.exists():
+        sys.path.insert(0, str(COMFYUI_ROOT))
+        try:
+            import asyncio
+
+            import execution as comfy_execution
+
+            import nodes as comfy_nodes2
+
+            for key in ("GroupSwitch", "SetVariable", "GetVariable"):
+                comfy_nodes2.NODE_CLASS_MAPPINGS[key] = mappings[key]
+
+            prompt = {
+                "1": {
+                    "class_type": "GroupSwitch",
+                    "inputs": {
+                        "disable_method": "bypass",
+                        "change_group_color": True,
+                        "sort_order": "b,c",
+                        "group_states": '{"b": true, "a": false}',
+                    },
+                },
+                "2": {
+                    "class_type": "SetVariable",
+                    "inputs": {"var_name": "grp", "value": ["1", 0]},
+                },
+                "3": {
+                    "class_type": "GetVariable",
+                    "inputs": {"var_name": "grp", "value": ["2", 0]},
+                },
+            }
+            result = asyncio.run(
+                comfy_execution.validate_inputs("lukutar-smoke", prompt, "3", {})
+            )
+            assert result[0] is True, (
+                f"group switch prompt failed validation: {result[1]}"
+            )
+        finally:
+            sys.path.remove(str(COMFYUI_ROOT))
+
+    # Seed History node. Contract regression: the ComfyUI frontend adds
+    # control_after_generate to every seed widget client-side with
+    # serialize:false and never sends it — declaring it server-side made
+    # prompts fail validation with "Required input is missing". The
+    # output must be plain INT so it wires into sampler seed inputs.
+    assert "SeedHistory" in mappings, "SeedHistory not registered"
+    assert "SeedHistory" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+
+    seed_history_node = mappings["SeedHistory"]()
+    seed_required = seed_history_node.INPUT_TYPES()["required"]
+    assert set(seed_required) == {"seed", "history_size"}, (
+        f"unexpected SeedHistory inputs: {sorted(seed_required)}"
+    )
+    assert seed_history_node.RETURN_TYPES == ("INT",)
+    assert seed_history_node.generate(seed=42, history_size=5) == (42,)
+
+    if COMFYUI_ROOT.exists():
+        sys.path.insert(0, str(COMFYUI_ROOT))
+        try:
+            import asyncio
+
+            import execution
+
+            import nodes as comfy_nodes3
+
+            for key in ("SeedHistory", "SetVariable", "GetVariable"):
+                comfy_nodes3.NODE_CLASS_MAPPINGS[key] = mappings[key]
+
+            # Shaped exactly like the prompt the frontend builds for the
+            # node: declared widget inputs only, no control_after_generate.
+            prompt = {
+                "1": {
+                    "class_type": "SeedHistory",
+                    "inputs": {"seed": 42, "history_size": 5},
+                },
+                "2": {
+                    "class_type": "SetVariable",
+                    "inputs": {"var_name": "sd_seed", "value": ["1", 0]},
+                },
+                "3": {
+                    "class_type": "GetVariable",
+                    "inputs": {"var_name": "sd_seed", "value": ["2", 0]},
+                },
+                "4": {
+                    "class_type": "PreviewImage",
+                    "inputs": {"images": ["3", 0]},
+                },
+            }
+            ok, error, outputs, _node_errors = asyncio.run(
+                execution.validate_prompt("lukutar-smoke", prompt, None)
+            )
+            assert ok, f"seed history prompt failed validation: {error}"
+            assert outputs == ["4"], f"unexpected outputs: {outputs}"
+        finally:
+            sys.path.remove(str(COMFYUI_ROOT))
+
     print("SMOKE TEST PASSED: nodes load and behave as expected")
 
 

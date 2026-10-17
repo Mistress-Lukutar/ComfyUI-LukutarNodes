@@ -30,6 +30,12 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **Set Variable / Get Variable** — named workflow variables: publish a
   value once, read it anywhere without dragging wires
   (`Lukutar/Variables`).
+- **Group Switch** — one boolean row per canvas group: switch whole
+  groups on/off (bypass or mute) from a single panel node
+  (`Lukutar/Groups`).
+- **Seed History** — a seed source with the built-in
+  `seed`/`control_after_generate` widgets plus a rolling log of used
+  seeds rendered as copyable text (`Lukutar/Seeds`).
 - **Paste (Clipspace, Keep Mask)** — context-menu item for image upload
   nodes: paste a clipspace image while keeping the node's painted mask
   (frontend extension, no node).
@@ -450,6 +456,95 @@ by hand.
   (set → set → get reads the last) — that is a duplicate-name conflict.
 - Without the web extension, wire the Get's `value` input manually (Set
   output → Get input works fine headless).
+
+### Group Switch
+
+A panel node that mirrors the canvas groups: one boolean row per group
+(`Lukutar/Groups`). A checked row means the group is active; unchecking
+switches the group off with the chosen method. Rows appear, reorder and
+vanish automatically as groups are added, renamed, reordered or deleted
+on the canvas — the node has no inputs, and its single `states` output
+carries the current `{group title: enabled}` dictionary (order follows
+the prefix alphabet below).
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| disable_method | bypass / disable | bypass | How an unchecked group is switched off. `bypass` sets the group's nodes to ComfyUI bypass mode (inputs wire through); `disable` sets them to never/mute (nodes leave the prompt). Same mechanism as the native group context menu. |
+| change_group_color | BOOLEAN | true | Recolor the frame of a switched-off group: purple for bypass, grey for disable; the original color is restored on re-enable. |
+| sort_order | STRING | — | Comma-separated title prefixes for the row order, e.g. `inp,im,det`. A group whose title starts with a token (case-insensitive) takes that token's position — letters or short combinations are enough, no full titles needed; several groups may share a token (they keep their relative order); unlisted groups follow at the end. |
+| group_states | STRING | `{}` | Current row states as JSON — managed automatically by the web extension and hidden on the node; edit it only for API workflows without the frontend. |
+
+| Name | Type | Description |
+|------|------|-------------|
+| states | GROUP_STATES | Ordered `{group title: enabled}` dictionary; wire it anywhere `*` is accepted (e.g. Set Variable) or leave it unconnected. |
+
+#### Behaviour
+
+- Toggling a row applies immediately: node modes are captured first and
+  restored on re-enable, so nodes you had muted individually keep that
+  state across a panel toggle. Groups switched off through the native
+  group menu are shown as-is but are not re-applied by parameter changes.
+- The panel state survives reloads. The rows are derived from the live
+  group node modes (which ComfyUI saves natively), and the declared
+  parameters keep a stable serialization, so `disable_method`,
+  `change_group_color`, `sort_order` and the states dictionary come back
+  exactly as saved. The original frame color of a recolored group is
+  remembered too, so a group re-enabled after a reload — even through
+  the native group menu — gets its own color back.
+- The row values always reflect the live graph: toggling a group via the
+  native group menu (or a second Group Switch node) updates the row on
+  the next sync tick.
+- Only the root canvas is mirrored; groups inside subgraphs are not
+  listed.
+- Duplicate group titles are disambiguated in the output keys as
+  `Title`, `Title (2)`, …
+- Without the web assets the node still loads and validates; drive it by
+  setting the `group_states` JSON (and optionally `sort_order`) manually.
+
+### Seed History
+
+A zero-input seed generator (`Lukutar/Seeds`): the same `seed` +
+`control_after_generate` widget pair as the built-in seed inputs, plus a
+`history_size` log. The seed wires into any sampler via its INT output.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| seed | INT | 0 | Starting seed value (0 … 2⁶⁴−1). |
+| history_size | INT | 5 | How many past seeds the rolling log keeps (1–1000). |
+
+| Name | Type | Description |
+|------|------|-------------|
+| seed | INT | The seed for the current generation; connect it to any `seed`/`noise_seed` input. |
+
+#### Behaviour
+
+- `control_after_generate` is added by the ComfyUI frontend to every
+  `seed` widget and applied there (fixed / increment / decrement /
+  randomize). It is deliberately not a backend input — the frontend
+  never sends it, so API workflows submit only `seed` (and
+  `history_size`).
+- The web extension keeps a rolling log of the seeds actually sent to
+  the backend (newest first, older seeds pushed down, trimmed to
+  `history_size`) and renders it
+  below the parameters, one seed per line, using the same widget the
+  core "Preview as Text" node displays its text with (plain text only
+  — the Markdown toggle it ships with is removed). While the log is
+  empty the panel shows a placeholder line, so the field is always
+  visible. The log is copied with the copy button in the panel's
+  top-right corner. Consecutive duplicates are collapsed, so
+  re-queueing with a fixed seed does not fill the log with the same
+  number.
+- The log is stored in a node property, so the history survives
+  reloads. Logs saved by older builds (kept in a hidden widget value)
+  are adopted on load.
+- If the frontend does not expose the "Preview as Text" helper, the
+  extension falls back to a plain text widget; without the web assets
+  the node still works as a plain seed source — the history is simply
+  not displayed.
 
 ### Paste (Clipspace, Keep Mask)
 
