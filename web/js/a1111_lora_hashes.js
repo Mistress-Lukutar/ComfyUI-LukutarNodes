@@ -128,8 +128,13 @@ app.registerExtension({
       applyVisibility(this);
 
       // Snap the node height down to what the visible widgets need.
-      const fitted = this.computeSize(this.size[0]);
-      if (fitted[1] < this.size[1]) this.size[1] = fitted[1];
+      // computeSize(out) expects a 2-slot output array; passing the
+      // width as a number throws in strict mode and aborts node
+      // creation entirely.
+      const fitted = this.computeSize();
+      if (Array.isArray(fitted) && fitted[1] < this.size[1]) {
+        this.size[1] = fitted[1];
+      }
 
       return result;
     };
