@@ -3,7 +3,7 @@ File:   __init__.py
 Brief:  Aggregation of node classes for the LukutarNodes pack.
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.9.0
+Version: v0.10.0
 '''
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from .prompt_annotate import (
     PromptAnnotateNode,
 )
 from .save_image import SaveImageNode
+from .save_image_jxl import SaveImageJxlNode
 from .seed_history import SeedHistoryNode
 from .segs_overlay import SegsOverlayNode
 from .segs_set_crop_size import SegsSetCropSizeNode
@@ -45,6 +46,7 @@ NODE_CLASS_MAPPINGS: dict[str, type] = {
     "SetVariable": SetVariableNode,
     "GetVariable": GetVariableNode,
     "LukutarSaveImage": SaveImageNode,
+    "LukutarSaveImageJxl": SaveImageJxlNode,
     "MetadataBlocks": MetadataBlocksNode,
     "StandardMetadata": StandardMetadataNode,
     "MergeMetadata": MergeMetadataNode,
@@ -66,6 +68,7 @@ NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
     "SetVariable": "Set Variable",
     "GetVariable": "Get Variable",
     "LukutarSaveImage": "Save Image (Metadata)",
+    "LukutarSaveImageJxl": "Save Image JXL",
     "MetadataBlocks": "Metadata Blocks",
     "StandardMetadata": "Standard Metadata",
     "MergeMetadata": "Merge Metadata",
@@ -85,6 +88,7 @@ __all__ = [
     "MetadataBlocksNode",
     "PromptAnnotateNode",
     "SaveImageNode",
+    "SaveImageJxlNode",
     "SeedHistoryNode",
     "SegsOverlayNode",
     "SegsSetCropSizeNode",

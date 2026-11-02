@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import collections
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -308,6 +309,64 @@ def _validate_metadata_prompt(mappings: dict[str, type]) -> None:
         )
         assert ok, f"metadata prompt failed validation: {error}"
         assert outputs == ["4"], f"unexpected outputs: {outputs}"
+    finally:
+        sys.path.remove(str(COMFYUI_ROOT))
+
+
+def _validate_jxl_prompt(mappings: dict[str, type]) -> None:
+    '''Validate a prompt wired to LukutarSaveImageJxl.
+
+    Builds: EmptyImage → LukutarSaveImageJxl with all required widget
+    values.  Runs regardless of whether pillow-jxl-plugin is installed
+    — only the node's INPUT_TYPES contract is being checked.
+    '''
+    if not COMFYUI_ROOT.exists():
+        print("NOTE: ComfyUI root not found, skipping JXL prompt validation e2e")
+        return
+    sys.path.insert(0, str(COMFYUI_ROOT))
+    try:
+        import asyncio
+
+        import execution
+
+        import nodes as comfy_nodes3
+
+        for key in ("LukutarSaveImageJxl", "SetVariable", "GetVariable"):
+            if key in mappings:
+                comfy_nodes3.NODE_CLASS_MAPPINGS[key] = mappings[key]
+
+        prompt = {
+            "1": {
+                "class_type": "EmptyImage",
+                "inputs": {
+                    "width": 8,
+                    "height": 8,
+                    "batch_size": 1,
+                    "color": 0,
+                },
+            },
+            "2": {
+                "class_type": "LukutarSaveImageJxl",
+                "inputs": {
+                    "images": ["1", 0],
+                    "path": "output",
+                    "filename": "jxl_smoke",
+                    "lossless": False,
+                    "quality": 90,
+                    "effort": 7,
+                    "decoding_speed": 0,
+                    "use_container": False,
+                    "use_original_profile": False,
+                    "num_threads": -1,
+                    "compress_metadata": False,
+                },
+            },
+        }
+        ok, error, outputs, _node_errors = asyncio.run(
+            execution.validate_prompt("lukutar-jxl-smoke", prompt, None)
+        )
+        assert ok, f"JXL prompt failed validation: {error}"
+        assert outputs == ["2"], f"unexpected outputs: {outputs}"
     finally:
         sys.path.remove(str(COMFYUI_ROOT))
 
@@ -838,6 +897,125 @@ def main() -> None:
         "model": "sdxl-v2",
         "revision": "beta",
     }
+
+    # ------------------------------------------------------------------ #
+    # E2E: LukutarSaveImageJxl — save + metadata round-trip             #
+    # ------------------------------------------------------------------ #
+    if "LukutarSaveImageJxl" in mappings:
+        sys.path.insert(0, str(COMFYUI_ROOT))
+        try:
+            from PIL import Image as PILImage  # noqa: F401
+
+            jxl_node = mappings["LukutarSaveImageJxl"]()
+
+            small_tensor = torch.rand(1, 8, 8, 3)  # B,H,W,3 float [0,1]
+
+            # Probe pillow-jxl-plugin availability.
+            try:
+                import pillow_jxl  # noqa: F401
+            except ImportError:
+                print("JXL node skipped: pillow-jxl-plugin not installed")
+            else:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    # Lossy save + EXIF round-trip.
+                    ret_lossy = jxl_node.save(
+                        images=small_tensor,
+                        path=tmpdir,
+                        filename="LukutarJxlSmoke",
+                        lossless=False,
+                        quality=90,
+                        effort=7,
+                        decoding_speed=0,
+                        use_container=False,
+                        use_original_profile=False,
+                        num_threads=-1,
+                        compress_metadata=False,
+                        metadata={"desc": "smoke"},
+                    )
+                    assert ret_lossy and "ui" in ret_lossy
+
+                    jxl_candidates = list(
+                        Path(tmpdir).rglob("LukutarJxlSmoke.jxl")
+                    )
+                    if not jxl_candidates:
+                        import folder_paths as comfy_fp
+
+                        base = getattr(comfy_fp, "base_path", Path.cwd())
+                        output_dir = Path(base) / "output"
+                        jxl_candidates = list(
+                            output_dir.rglob("LukutarJxlSmoke.jxl")
+                        )
+                    assert jxl_candidates, "JXL file not found after save"
+                    jxl_path = jxl_candidates[0]
+
+                    # Verify EXIF round-trip via PIL.
+                    with PILImage.open(jxl_path) as img:
+                        exif = img.getexif()
+                        raw = exif.get(0x9286)
+                        assert raw is not None, (
+                            "EXIF UserComment missing in JXL"
+                        )
+                        data = raw[8:].decode("utf-16").rstrip("\x00")
+                        loaded = json.loads(data)
+                        assert loaded == {"desc": "smoke"}, (
+                            f"JXL EXIF round-trip mismatch: {loaded}"
+                        )
+
+                    # Lossless save with pixel-exact read-back.
+                    lossless_frame = np.array(
+                        [
+                            [[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]],
+                            [[70.0, 80.0, 90.0], [100.0, 110.0, 120.0]],
+                        ],
+                        dtype=np.float32,
+                    )
+                    lossless_tensor = torch.from_numpy(
+                        (lossless_frame / 255.0).astype(np.float32)
+                    )[None]
+
+                    ret_lossless = jxl_node.save(
+                        images=lossless_tensor,
+                        path=tmpdir,
+                        filename="LukutarJxlLossless",
+                        lossless=True,
+                        quality=50,  # ignored in lossless mode
+                        effort=7,
+                        decoding_speed=0,
+                        use_container=False,
+                        use_original_profile=False,
+                        num_threads=-1,
+                        compress_metadata=False,
+                    )
+                    assert ret_lossless and "ui" in ret_lossless
+
+                    ll_candidates = list(
+                        Path(tmpdir).rglob("LukutarJxlLossless.jxl")
+                    )
+                    if not ll_candidates:
+                        ll_candidates = list(
+                            output_dir.rglob("LukutarJxlLossless.jxl")
+                        )
+                    assert ll_candidates, (
+                        "Lossless JXL file not found"
+                    )
+
+                    with PILImage.open(ll_candidates[0]) as img:
+                        back = np.array(img)
+                        expected = np.clip(
+                            np.rint(lossless_frame), 0, 255
+                        ).astype(np.uint8)
+                        assert np.array_equal(
+                            back, expected
+                        ), "Lossless JXL round-trip pixel mismatch"
+
+        finally:
+            sys.path.remove(str(COMFYUI_ROOT))
+
+    # ------------------------------------------------------------------ #
+    # Validate LukutarSaveImageJxl prompt (always runs if node registered)
+    # ------------------------------------------------------------------ #
+    if "LukutarSaveImageJxl" in mappings:
+        _validate_jxl_prompt(mappings)
 
     print("SMOKE TEST PASSED: nodes load and behave as expected")
 

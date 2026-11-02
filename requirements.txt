@@ -1,2 +1,4 @@
 # Runtime dependencies beyond the ComfyUI base (torch, numpy ship with it).
 opencv-python>=4.8
+# JPEG-XL codec for the dedicated Save Image JXL node (libjxl bundled in the wheels).
+pillow-jxl-plugin>=1.3.7

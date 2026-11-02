@@ -3,7 +3,7 @@ File:   save_image.py
 Brief:  ComfyUI node for saving IMAGE batches to disk in various formats.
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.1.0
+Version: v0.2.0
 '''
 
 from __future__ import annotations
@@ -39,6 +39,45 @@ def _comfy_base_dir() -> Path:
     if HAS_COMFY:
         return Path(getattr(folder_paths, "base_path", Path.cwd()))
     return Path.cwd()
+
+
+def build_ui_entries(saved: list[Path]) -> list[dict[str, str]]:
+    '''Build the ``ui.images`` list for ComfyUI's preview panel.
+
+    Each entry maps a saved file to its subfolder and output type so
+    that ComfyUI can display it in the history / output viewer.
+
+    Args:
+        saved: List of destination :class:`Path` objects returned by
+            a saver function.
+
+    Returns:
+        List of dicts with keys ``filename``, ``subfolder``, ``type``.
+    '''
+    entries: list[dict[str, str]] = []
+    if HAS_COMFY:
+        output_dir = folder_paths.get_output_directory()
+        for p in saved:
+            try:
+                resolved = p.resolve()
+                out_resolved = Path(output_dir).resolve()
+                if resolved.is_relative_to(out_resolved):
+                    rel_parent = resolved.parent.relative_to(
+                        out_resolved
+                    )
+                    subfolder = rel_parent.as_posix()
+                    if subfolder == ".":
+                        subfolder = ""
+                    entries.append(
+                        {
+                            "filename": p.name,
+                            "subfolder": subfolder,
+                            "type": "output",
+                        }
+                    )
+            except (ValueError, OSError):
+                pass
+    return entries
 
 
 class SaveImageNode:
@@ -93,8 +132,7 @@ class SaveImageNode:
                         "min": 1,
                         "max": 100,
                         "tooltip": (
-                            "Used by JPG, WEBP and JXL; ignored by PNG, "
-                            "TIFF and BMP."
+                            "Used by JPG and WEBP; ignored by PNG, TIFF and BMP."
                         ),
                     },
                 ),
@@ -142,7 +180,7 @@ class SaveImageNode:
             path: Target directory string.
             filename: Base filename stem.
             format: Output format name.
-            quality: JPEG/WEBP/JXL quality value.
+            quality: JPEG/WEBP quality value.
             metadata: Optional metadata dict to embed.
 
         Returns:
@@ -159,28 +197,4 @@ class SaveImageNode:
             frames, path, filename, format, quality, metadata, _comfy_base_dir()
         )
 
-        entries: list[dict[str, str]] = []
-        if HAS_COMFY:
-            output_dir = folder_paths.get_output_directory()
-            for p in saved:
-                try:
-                    resolved = p.resolve()
-                    out_resolved = Path(output_dir).resolve()
-                    if resolved.is_relative_to(out_resolved):
-                        rel_parent = resolved.parent.relative_to(
-                            out_resolved
-                        )
-                        subfolder = rel_parent.as_posix()
-                        if subfolder == ".":
-                            subfolder = ""
-                        entries.append(
-                            {
-                                "filename": p.name,
-                                "subfolder": subfolder,
-                                "type": "output",
-                            }
-                        )
-                except (ValueError, OSError):
-                    pass
-
-        return {"ui": {"images": entries}}
+        return {"ui": {"images": build_ui_entries(saved)}}

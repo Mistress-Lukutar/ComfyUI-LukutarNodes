@@ -3,15 +3,16 @@ File:   image_saver.py
 Brief:  Pure engine for saving numpy frames to disk in various image formats.
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.1.1
+Version: v0.2.0
 '''
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -33,8 +34,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-#: Display order for save formats.
-SAVE_FORMATS: tuple[str, ...] = ("PNG", "JPG", "JXL", "WEBP", "TIFF", "BMP")
+#: Display order for save formats (JPEG-XL has its own dedicated saver).
+SAVE_FORMATS: tuple[str, ...] = ("PNG", "JPG", "WEBP", "TIFF", "BMP")
 
 #: Mapping from display name to file-extension (with dot).
 EXTENSIONS: dict[str, str] = {
@@ -49,7 +50,7 @@ EXTENSIONS: dict[str, str] = {
 #: Formats that cannot embed any metadata dict.
 METADATALESS_FORMATS: tuple[str, ...] = ("BMP",)
 
-#: Default JPEG/WEBP/JXL quality when not specified by the user.
+#: Default JPEG/WEBP quality when not specified by the user.
 DEFAULT_QUALITY: int = 95
 
 #: Socket type consumed from the metadata inputs (mirrors core.metadata.METADATA_TYPE).
@@ -57,18 +58,93 @@ METADATA_TYPE: str = "LUKUTAR_METADATA"
 
 
 # ---------------------------------------------------------------------------
+# JxlSettings dataclass
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass(frozen=True)
+class JxlSettings:
+    #: Encoder parameters for the dedicated JPEG-XL saver.
+    #: lossless: mathematically exact encoding.
+    lossless: bool = False
+    #: quality: JPEG-style lossy quality 0-100, ignored when lossless.
+    quality: int = 90
+    #: effort: 1-9, higher = better compression, slower.
+    effort: int = 7
+    #: decoding_speed: 0-4 tier, higher = faster decode, larger files.
+    decoding_speed: int = 0
+    #: use_container: wrap the codestream in the JXL container format.
+    use_container: bool = False
+    #: use_original_profile: keep the original color profile (skip YCbCr conversion).
+    use_original_profile: bool = False
+    #: num_threads: encoder threads; -1 = automatic.
+    num_threads: int = -1
+    #: compress_metadata: compress the embedded metadata boxes.
+    compress_metadata: bool = False
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def available_formats() -> tuple[str, ...]:
-    '''Return the list of save formats minus JXL when the plugin is absent.
+    '''Return the list of save formats supported by the generic saver.
+
+    JPEG-XL is no longer included here; it has its own dedicated saver
+    (``save_frame_jxl`` / ``save_images_jxl``).
 
     Returns:
         Tuple of format names usable on this runtime.
     '''
-    if HAS_JXL_PLUGIN:
-        return SAVE_FORMATS
-    return tuple(f for f in SAVE_FORMATS if f != "JXL")
+    return SAVE_FORMATS
+
+
+def _save_batch(
+    frames: Sequence[np.ndarray],
+    path: str,
+    filename: str,
+    ext: str,
+    base_dir: Path,
+    saver: Callable[[np.ndarray, Path], Path],
+) -> list[Path]:
+    '''Internal batch loop shared by ``save_images`` and ``save_images_jxl``.
+
+    Args:
+        frames: Sequence of HWC RGB numpy arrays.
+        path: User-supplied directory string.
+        filename: Base filename stem (extension added automatically).
+        ext: File extension including the leading dot (e.g. ``".png"``).
+        base_dir: ComfyUI root for resolving relative paths.
+        saver: Callable(frame, dst) -> Path that saves one frame.
+
+    Returns:
+        List of destination :class:`Path` objects (one per frame).
+
+    Raises:
+        RuntimeError: When any individual frame fails to save.
+    '''
+    target_dir = normalize_dir(path, base_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    base_stem = sanitize_filename(filename)
+    results: list[Path] = []
+
+    single = len(frames) == 1
+
+    for i, frame in enumerate(frames):
+        stem = base_stem if single else f"{base_stem}_{i:05d}"
+
+        dst = unique_destination(target_dir, stem, ext)
+
+        try:
+            saver(frame, dst)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to save frame {i} to {dst}"
+            ) from exc
+
+        results.append(dst)
+
+    return results
 
 
 def supports_metadata(fmt: str) -> bool:
@@ -196,7 +272,7 @@ def build_exif_payload(metadata: Mapping[str, str]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Frame saver
+# Frame savers
 # ---------------------------------------------------------------------------
 
 def save_frame(
@@ -212,7 +288,7 @@ def save_frame(
         frame: HWC RGB array (float or uint8).
         dst: Destination path.
         fmt: Format name (one of :data:`SAVE_FORMATS`).
-        quality: JPEG/WEBP/JXL quality (1-100). Ignored by PNG, TIFF, BMP.
+        quality: JPEG/WEBP quality (1-100). Ignored by PNG, TIFF, BMP.
         metadata: Optional key-value pairs to embed in the file.
 
     Returns:
@@ -247,9 +323,6 @@ def save_frame(
                 td[270] = json.dumps(metadata, ensure_ascii=False)
                 tiffinfo = td
             img.save(dst, format="TIFF", tiffinfo=tiffinfo)
-        elif fmt == "JXL":
-            exif = build_exif_payload(metadata) if metadata else None
-            img.save(dst, format="JXL", quality=quality, exif=exif)
         elif fmt == "BMP":
             img.save(dst, format="BMP")
 
@@ -274,8 +347,79 @@ def save_frame(
     return dst
 
 
+def save_frame_jxl(
+    frame: np.ndarray,
+    dst: Path,
+    settings: JxlSettings,
+    metadata: Mapping[str, str] | None = None,
+) -> Path:
+    '''Save a single HWC RGB numpy frame as JPEG-XL to *dst*.
+
+    Uses the ``pillow-jxl-plugin`` encoder.  Raises
+    :exc:`RuntimeError` when the plugin or Pillow is not installed.
+
+    Args:
+        frame: HWC RGB array (float or uint8).
+        dst: Destination path.
+        settings: Encoder parameters from :class:`JxlSettings`.
+        metadata: Optional key-value pairs to embed in the file.
+
+    Returns:
+        The absolute *dst* path.
+
+    Raises:
+        RuntimeError: When pillow-jxl-plugin or Pillow is missing,
+            or save fails twice.
+    '''
+    if not HAS_JXL_PLUGIN:
+        raise RuntimeError(
+            "pillow-jxl-plugin is not installed - install it with: "
+            "pip install pillow-jxl-plugin"
+        )
+    if not HAS_PIL:
+        raise RuntimeError("Pillow is required to save JXL frames")
+
+    cleaned = np.clip(np.rint(frame), 0, 255).astype(np.uint8)
+    img = Image.fromarray(cleaned, mode="RGB")
+
+    # Attempt save with metadata; degrade once on failure.  The payload
+    # is built inside the guard so a build failure also falls back to a
+    # clean metadata-less save.
+    try:
+        exif = build_exif_payload(metadata) if metadata else None
+        img.save(
+            dst,
+            format="JXL",
+            lossless=settings.lossless,
+            quality=(100 if settings.lossless else settings.quality),
+            effort=settings.effort,
+            decoding_speed=settings.decoding_speed,
+            use_container=settings.use_container,
+            use_original_profile=settings.use_original_profile,
+            num_threads=settings.num_threads,
+            compress_metadata=settings.compress_metadata,
+            exif=exif,
+        )
+    except Exception as orig_exc:
+        if metadata is not None:
+            logger.warning(
+                "Save %s with metadata failed (JXL); retrying without metadata",
+                dst,
+            )
+            try:
+                img.save(dst, format="JXL")
+            except Exception:
+                raise RuntimeError(
+                    f"Failed to save {dst} (JXL)"
+                ) from orig_exc
+        else:
+            raise
+
+    return dst
+
+
 # ---------------------------------------------------------------------------
-# Batch saver
+# Batch savers
 # ---------------------------------------------------------------------------
 
 def save_images(
@@ -294,7 +438,7 @@ def save_images(
         path: User-supplied directory string.
         filename: Base filename stem (extension added automatically).
         fmt: Target format name.
-        quality: JPEG/WEBP/JXL quality value.
+        quality: JPEG/WEBP quality value.
         metadata: Optional metadata dict to embed in each file.
         base_dir: ComfyUI root for resolving relative paths.
 
@@ -304,27 +448,63 @@ def save_images(
     Raises:
         RuntimeError: When any individual frame fails to save.
     '''
-    target_dir = normalize_dir(path, base_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    base_stem = sanitize_filename(filename)
     ext = EXTENSIONS.get(fmt, ".png")
-    results: list[Path] = []
+    return _save_batch(
+        frames, path, filename, ext, base_dir,
+        lambda frame, dst: save_frame(frame, dst, fmt, quality, metadata),
+    )
 
-    single = len(frames) == 1
 
-    for i, frame in enumerate(frames):
-        stem = base_stem if single else f"{base_stem}_{i:05d}"
+def save_images_jxl(
+    frames: Sequence[np.ndarray],
+    path: str,
+    filename: str,
+    settings: JxlSettings,
+    metadata: Mapping[str, str] | None,
+    base_dir: Path,
+) -> list[Path]:
+    '''Save a batch of frames as JPEG-XL to disk.
 
-        dst = unique_destination(target_dir, stem, ext)
+    Args:
+        frames: Sequence of HWC RGB numpy arrays.
+        path: User-supplied directory string.
+        filename: Base filename stem (extension added automatically).
+        settings: Encoder parameters from :class:`JxlSettings`.
+        metadata: Optional metadata dict to embed in each file.
+        base_dir: ComfyUI root for resolving relative paths.
 
-        try:
-            save_frame(frame, dst, fmt, quality, metadata)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to save frame {i} to {dst}"
-            ) from exc
+    Returns:
+        List of destination :class:`Path` objects (one per frame).
 
-        results.append(dst)
+    Raises:
+        RuntimeError: When any individual frame fails to save,
+            or the plugin / Pillow is missing.
+    '''
+    ext = EXTENSIONS["JXL"]
+    return _save_batch(
+        frames, path, filename, ext, base_dir,
+        lambda frame, dst: save_frame_jxl(frame, dst, settings, metadata),
+    )
 
-    return results
+
+__all__ = [
+    "DEFAULT_QUALITY",
+    "EXTENSIONS",
+    "HAS_JXL_PLUGIN",
+    "HAS_PIL",
+    "JxlSettings",
+    "METADATA_TYPE",
+    "METADATALESS_FORMATS",
+    "SAVE_FORMATS",
+    "build_exif_payload",
+    "build_png_info",
+    "available_formats",
+    "normalize_dir",
+    "sanitize_filename",
+    "save_frame",
+    "save_frame_jxl",
+    "save_images",
+    "save_images_jxl",
+    "supports_metadata",
+    "unique_destination",
+]

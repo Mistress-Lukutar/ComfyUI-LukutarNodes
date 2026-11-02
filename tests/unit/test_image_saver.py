@@ -7,25 +7,32 @@ Version: v0.1.0
 
 Tests core.image_saver functions: sanitize_filename, normalize_dir,
 unique_destination, available_formats, supports_metadata, save_frame,
-save_images. Requires Pillow.
+save_images, JxlSettings, save_frame_jxl, save_images_jxl. Requires
+Pillow.
 '''
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 import pytest
+from comfyui_lukutar_nodes.core import image_saver as _image_saver_mod
 from comfyui_lukutar_nodes.core.image_saver import (
+    HAS_JXL_PLUGIN,
     HAS_PIL,
     SAVE_FORMATS,
+    JxlSettings,
     available_formats,
     normalize_dir,
     sanitize_filename,
     save_frame,
+    save_frame_jxl,
     save_images,
+    save_images_jxl,
     supports_metadata,
     unique_destination,
 )
@@ -132,22 +139,11 @@ def test_unique_destination_appends_counter_on_collision(tmp_path: Path) -> None
 # ======================================================================
 
 
-def test_available_formats_excludes_jxl_without_plugin() -> None:
-    """JXL is absent when HAS_JXL_PLUGIN is False."""
-    with patch(
-        "comfyui_lukutar_nodes.core.image_saver.HAS_JXL_PLUGIN", False
-    ):
-        fmts = available_formats()
-        assert "JXL" not in fmts
-
-
-def test_available_formats_includes_jxl_with_plugin() -> None:
-    """JXL is present when HAS_JXL_PLUGIN is True."""
-    with patch(
-        "comfyui_lukutar_nodes.core.image_saver.HAS_JXL_PLUGIN", True
-    ):
-        fmts = available_formats()
-        assert "JXL" in fmts
+def test_available_formats_excludes_jxl() -> None:
+    """JXL is not in SAVE_FORMATS — it has its own dedicated saver."""
+    fmts = available_formats()
+    assert fmts == ("PNG", "JPG", "WEBP", "TIFF", "BMP")
+    assert "JXL" not in fmts
 
 
 def test_supports_metadata_bmp_false_others_true() -> None:
@@ -272,38 +268,273 @@ def test_save_bmp_no_metadata_error(tmp_path: Path, sample_frame: np.ndarray) ->
     assert dst.exists()
 
 
-# -- JXL round-trip --------------------------------------------------------
+# -- JXL format removed from generic saver ---------------------------------
 
-def test_save_jxl_roundtrip(tmp_path: Path, sample_frame: np.ndarray) -> None:
-    """JXL saves and optionally reads back EXIF if pillow_jxl works."""
-    if not HAS_PIL:
-        pytest.skip("Pillow not installed")
-
+def test_save_frame_jxl_format_raises_valueerror(tmp_path: Path) -> None:
+    """save_frame with fmt='JXL' raises ValueError (unknown format)."""
+    frame = np.full((4, 4, 3), 128.0, dtype=np.float32)
     dst = tmp_path / "test.jxl"
+    with pytest.raises(ValueError, match="Unknown format"):
+        save_frame(frame, dst, "JXL")
+
+
+# ======================================================================
+# JxlSettings dataclass
+# ======================================================================
+
+
+def test_jxl_settings_defaults() -> None:
+    """Default values match the spec."""
+    s = JxlSettings()
+    assert s.lossless is False
+    assert s.quality == 90
+    assert s.effort == 7
+    assert s.decoding_speed == 0
+    assert s.use_container is False
+    assert s.use_original_profile is False
+    assert s.num_threads == -1
+    assert s.compress_metadata is False
+
+
+def test_jxl_settings_frozen() -> None:
+    """Mutation raises FrozenInstanceError."""
+    s = JxlSettings()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        s.lossless = True  # type: ignore[assignment]
+
+
+def test_jxl_settings_custom_values() -> None:
+    """Custom values are stored."""
+    s = JxlSettings(lossless=True, quality=50, effort=9)
+    assert s.lossless is True
+    assert s.quality == 50
+    assert s.effort == 9
+
+
+# ======================================================================
+# save_frame_jxl (requires pillow-jxl-plugin)
+# ======================================================================
+
+@pytest.fixture()
+def jxl_plugin_available() -> bool:
+    """Skip fixture for JXL tests when plugin is absent."""
+    if not HAS_JXL_PLUGIN:
+        pytest.skip("pillow-jxl-plugin not installed")
+    return True  # noqa: RET504
+
+
+# -- Lossy round-trip ------------------------------------------------------
+
+def test_save_frame_jxl_lossy_roundtrip(
+    tmp_path: Path, sample_frame: np.ndarray, jxl_plugin_available: bool
+) -> None:
+    """Lossy JXL saves and reads back EXIF metadata."""
+    from PIL import Image as PILImage
+
+    dst = tmp_path / "test_lossy.jxl"
     meta = _make_metadata()
-    try:
-        save_frame(sample_frame, dst, "JXL", quality=95, metadata=meta)
-    except Exception as exc:
-        pytest.skip(f"pillow_jxl save failed: {exc}")
+    save_frame_jxl(sample_frame, dst, JxlSettings(quality=90), metadata=meta)
 
     assert dst.exists()
 
-    # If readable, verify EXIF round-trip
-    try:
-        from PIL import Image as PILImage
-
-        with PILImage.open(dst) as img:
-            exif = img.getexif()
-            raw = exif.get(0x9286)
-            if raw is not None:
-                data = raw[8:].decode("utf-16").rstrip("\x00")
-                loaded = json.loads(data)
-                assert loaded == meta
-    except Exception as exc:
-        pytest.skip(f"pillow_jxl read failed: {exc}")
+    with PILImage.open(dst) as img:
+        exif = img.getexif()
+        raw = exif.get(0x9286)
+        assert raw is not None, "EXIF UserComment missing in lossy JXL"
+        data = raw[8:].decode("utf-16").rstrip("\x00")
+        loaded = json.loads(data)
+        assert loaded == meta
 
 
-# -- metadata-rejection resilience -----------------------------------------
+# -- Lossless round-trip ---------------------------------------------------
+
+def test_save_frame_jxl_lossless_exact(
+    tmp_path: Path, sample_frame: np.ndarray, jxl_plugin_available: bool
+) -> None:
+    """Lossless JXL preserves every pixel exactly."""
+    from PIL import Image as PILImage
+
+    # Use non-uniform values to detect any rounding.
+    frame = np.array(
+        [
+            [[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]],
+            [[70.0, 80.0, 90.0], [100.0, 110.0, 120.0]],
+        ],
+        dtype=np.float32,
+    )
+    dst = tmp_path / "test_lossless.jxl"
+    save_frame_jxl(frame, dst, JxlSettings(lossless=True, quality=50))
+
+    assert dst.exists()
+
+    with PILImage.open(dst) as img:
+        back = np.array(img)
+        expected = np.clip(np.rint(frame), 0, 255).astype(np.uint8)
+        assert np.array_equal(back, expected), "Lossless round-trip pixel mismatch"
+
+
+# -- Degrade path (metadata error → retry without metadata) ----------------
+
+def test_save_frame_jxl_degrade_on_metadata_error(
+    tmp_path: Path, sample_frame: np.ndarray, jxl_plugin_available: bool
+) -> None:
+    """When build_exif_payload raises inside the try block, save retries."""
+    from PIL import Image as PILImage
+
+    dst = tmp_path / "test_degrade.jxl"
+    meta = {"key": "val"}
+
+    # Patch to succeed on first call (builds exif), fail on second save.
+    original_build_exif = _image_saver_mod.build_exif_payload
+    call_count = 0
+
+    def counting_build_exif(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return original_build_exif(*args, **kwargs)
+        raise RuntimeError("exif boom on retry")
+
+    with patch.object(
+        _image_saver_mod, "build_exif_payload", counting_build_exif
+    ):
+        save_frame_jxl(sample_frame, dst, JxlSettings(), metadata=meta)
+
+    assert dst.exists()
+
+    with PILImage.open(dst) as img:
+        # Should be a valid image (no exception on open).
+        assert img.format == "JXL"
+
+
+def test_save_frame_jxl_degrade_on_first_build_error(
+    tmp_path: Path, sample_frame: np.ndarray, jxl_plugin_available: bool
+) -> None:
+    """When the EXIF payload itself fails to build, a clean save is written."""
+    from PIL import Image as PILImage
+
+    dst = tmp_path / "test_degrade_build.jxl"
+
+    def failing_build_exif(*args, **kwargs):
+        raise RuntimeError("exif boom on build")
+
+    with patch.object(
+        _image_saver_mod, "build_exif_payload", failing_build_exif
+    ):
+        save_frame_jxl(
+            sample_frame, dst, JxlSettings(), metadata={"key": "val"}
+        )
+
+    assert dst.exists()
+
+    with PILImage.open(dst) as img:
+        assert img.format == "JXL"
+
+
+# -- Plugin-missing contract -----------------------------------------------
+
+def test_save_frame_jxl_plugin_missing(
+    tmp_path: Path, sample_frame: np.ndarray
+) -> None:
+    """When HAS_JXL_PLUGIN is False, save_frame_jxl raises RuntimeError."""
+    dst = tmp_path / "test.jxl"
+
+    with patch.object(_image_saver_mod, "HAS_JXL_PLUGIN", False):
+        with pytest.raises(RuntimeError) as exc_info:
+            save_frame_jxl(sample_frame, dst, JxlSettings())
+        assert "pillow-jxl-plugin" in str(exc_info.value).lower()
+
+
+# ======================================================================
+# save_images_jxl (requires pillow-jxl-plugin)
+# ======================================================================
+
+# -- Single frame → bare stem ----------------------------------------------
+
+def test_save_images_jxl_single_frame(
+    tmp_path: Path, jxl_plugin_available: bool
+) -> None:
+    """Single-frame batch writes bare-stem .jxl."""
+    frames = [np.full((4, 4, 3), 50.0, dtype=np.float32)]
+    results = save_images_jxl(
+        frames, str(tmp_path), "bare", JxlSettings(), None, tmp_path
+    )
+    assert len(results) == 1
+    assert results[0].name == "bare.jxl"
+
+
+# -- Multi-frame batch → indexed names -------------------------------------
+
+def test_save_images_jxl_batch_indexed(
+    tmp_path: Path, jxl_plugin_available: bool
+) -> None:
+    """3-frame batch produces stem_00000..stem_00002."""
+    frames = [
+        np.full((4, 4, 3), float(i * 50 + 10), dtype=np.float32)
+        for i in range(3)
+    ]
+    results = save_images_jxl(
+        frames, str(tmp_path), "stem", JxlSettings(), None, tmp_path
+    )
+    assert len(results) == 3
+    names = sorted(r.name for r in results)
+    assert names == ["stem_00000.jxl", "stem_00001.jxl", "stem_00002.jxl"]
+
+
+# -- Collision suffix on repeated call -------------------------------------
+
+def test_save_images_jxl_collision_suffix(
+    tmp_path: Path, jxl_plugin_available: bool
+) -> None:
+    """Second identical call produces collision-suffixed files."""
+    frames = [np.full((4, 4, 3), 50.0, dtype=np.float32)]
+    r1 = save_images_jxl(
+        frames, str(tmp_path), "stem", JxlSettings(), None, tmp_path
+    )
+    r2 = save_images_jxl(
+        frames, str(tmp_path), "stem", JxlSettings(), None, tmp_path
+    )
+    assert len(r2) == 1
+    assert "_00001.jxl" in r2[0].name
+    assert r1[0].exists()
+    assert r2[0].exists()
+
+
+# -- Nested dirs created ---------------------------------------------------
+
+def test_save_images_jxl_nested_dirs(
+    tmp_path: Path, jxl_plugin_available: bool
+) -> None:
+    """Nested target directories are created automatically."""
+    frames = [np.full((4, 4, 3), 50.0, dtype=np.float32)]
+    results = save_images_jxl(
+        frames, "a/b/c", "img", JxlSettings(), None, tmp_path
+    )
+    assert len(results) == 1
+    # The file lives at tmp_path/a/b/c/img.jxl; going up 3 levels from the file
+    # parent gives us 'a'.
+    assert results[0].parent.parent.parent.name == "a"
+
+
+# -- All returned paths exist ----------------------------------------------
+
+def test_save_images_jxl_all_paths_exist(
+    tmp_path: Path, jxl_plugin_available: bool
+) -> None:
+    """Every path returned by save_images_jxl exists on disk."""
+    frames = [
+        np.full((4, 4, 3), float(i * 50 + 10), dtype=np.float32)
+        for i in range(3)
+    ]
+    results = save_images_jxl(
+        frames, str(tmp_path), "batch", JxlSettings(), None, tmp_path
+    )
+    assert all(r.exists() for r in results)
+
+
+# ======================================================================
+# metadata-rejection resilience (generic)
+# ======================================================================
 
 def test_save_frame_degrades_on_metadata_error(
     tmp_path: Path, sample_frame: np.ndarray

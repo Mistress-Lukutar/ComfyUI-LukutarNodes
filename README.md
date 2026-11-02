@@ -39,9 +39,12 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **Seed History** — a seed source with the built-in
   `seed`/`control_after_generate` widgets plus a rolling log of used
   seeds rendered as copyable text (`Lukutar/Seeds`).
-- **Save Image (Metadata)** — save IMAGE batches to disk in various
-  formats with optional LUKUTAR_METADATA embedding
+- **Save Image (Metadata)** — save IMAGE batches to disk as PNG, JPG,
+  WEBP, TIFF or BMP with optional LUKUTAR_METADATA embedding
   (`Lukutar/Image`).
+- **Save Image JXL** — dedicated JPEG-XL saver with lossy and lossless
+  modes and full encoder control (loss, effort, decode speed, threads,
+  metadata via EXIF box) (`Lukutar/Image`).
 - **Metadata Blocks** — build a LUKUTAR_METADATA dict from up to 16
   editable name/value pairs (`Lukutar/Metadata`).
 - **Standard Metadata** — emit workflow / prompt / datetime entries as
@@ -671,8 +674,8 @@ nodes and consumed by this save node.
 | images | IMAGE | — | Batch of frames to save. |
 | path | STRING | "output" | Target directory. Relative paths resolve against the ComfyUI root (`folder_paths.base_path`); absolute paths are used as-is. Missing directories are created automatically. |
 | filename | STRING | "Lukutar" | Base file name (extension added automatically). Forbidden characters for Windows filenames are replaced with underscores. |
-| format | COMBO | PNG | Output format: `PNG`, `JPG`, `JXL`, `WEBP`, `TIFF`, `BMP`. `JXL` appears only when the optional `pillow-jxl-plugin` package is installed (`pip install pillow-jxl-plugin`); it is NOT listed in `requirements.txt`. |
-| quality | INT | 95 | Compression quality, 1–100. Used by `JPG`, `WEBP`, `JXL`; ignored by `PNG`, `TIFF`, `BMP`. |
+| format | COMBO | PNG | Output format: `PNG`, `JPG`, `WEBP`, `TIFF`, `BMP`. |
+| quality | INT | 95 | Compression quality, 1–100. Used by `JPG` and `WEBP`; ignored by `PNG`, `TIFF`, `BMP`. For JPEG-XL use the dedicated **Save Image JXL** node (see below). |
 
 #### Inputs
 
@@ -689,7 +692,7 @@ nodes and consumed by this save node.
   `_00002`, … is appended so repeated runs never overwrite.
 - Metadata embedding per format:
   - **PNG** — one `tEXt` chunk per key/value pair.
-  - **JPG / WEBP / JXL** — EXIF UserComment tag (0x9286); the payload
+  - **JPG / WEBP** — EXIF UserComment tag (0x9286); the payload
     is `UNICODE\0` + UTF-16-encoded JSON of the metadata dict, matching
     A1111-style readers.
   - **TIFF** — ImageDescription tag (270) holding the JSON-encoded
@@ -706,6 +709,59 @@ nodes and consumed by this save node.
   inside ComfyUI's output directory.
 - Without the web extension the node is fully functional — the metadata
   socket is always declared and can be wired manually.
+
+### Save Image JXL
+
+Dedicated JPEG-XL saver backed by the `pillow-jxl-plugin` package
+(`Lukutar/Image`). Supports both lossy and lossless modes with full
+encoder control. No outputs; it is an `OUTPUT_NODE` that always
+re-executes (mirrors ComfyUI's own SaveImage behaviour).
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| images | IMAGE | — | Batch of frames to save. |
+| path | STRING | "output" | Target directory. Relative paths resolve against the ComfyUI root (`folder_paths.base_path`); absolute paths are used as-is. Missing directories are created automatically. |
+| filename | STRING | "Lukutar" | Base file name (extension added automatically). Forbidden characters for Windows filenames are replaced with underscores. |
+| lossless | BOOLEAN | off | Lossless (mathematically exact) encoding. When on, output pixels are identical to the input and `quality` is ignored. |
+| quality | INT | 90 | JPEG-style lossy quality, 0–100. `100` ≈ visually lossless. Ignored in lossless mode. |
+| effort | INT | 7 | Encoder effort, 1–9. Higher values compress better but run slower. |
+| decoding_speed | INT | 0 | Decode-speed tier, 0–4. `0` = smallest files / slowest decode; `4` = fastest decode / larger files. |
+| use_container | BOOLEAN | off | Wrap the codestream in the JXL container format. |
+| use_original_profile | BOOLEAN | off | Keep the original color profile (skip YCbCr conversion). |
+| num_threads | INT | -1 | Encoder threads; `-1` = automatic (up to 64). |
+| compress_metadata | BOOLEAN | off | Compress the embedded metadata boxes. |
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| metadata | LUKUTAR_METADATA | — | Optional metadata blocks written into the file as an EXIF box. |
+
+#### Behaviour
+
+- One `.jxl` file per frame is written. Multi-frame batches receive
+  indexed names: `filename_00000`, `filename_00001`, … (zero-padded
+  five digits). A single-frame batch keeps the bare filename without
+  an index.
+- When a target file already exists, a collision suffix `_00001`,
+  `_00002`, … is appended so repeated runs never overwrite.
+- **Lossless mode.** When `lossless` is on the encoder forces quality
+  to 100; output pixels are mathematically identical to the input. The
+  test suite asserts pixel-exact round-trips in lossless mode.
+- Metadata is embedded as a JXL EXIF box — the same LUKUTAR_METADATA
+  dict format used by the generic saver, stored as JSON inside the EXIF
+  UserComment tag (`UNICODE\0` + UTF-16).
+- Without the web extension the node is fully functional. Node preview
+  (`ui.images`) shows saved files only when they land inside ComfyUI's
+  output directory.
+- **Dependency.** `pillow-jxl-plugin` is listed in
+  `requirements.txt` (alongside `opencv-python`). ComfyUI-Manager /
+  comfy-cli install it automatically with the pack. The wheels statically
+  bundle libjxl, so no system `libjxl` or other JXL package is needed.
+  If the plugin is missing at execution time the node raises a clear
+  `RuntimeError` with the install command.
 
 ### Metadata Blocks
 

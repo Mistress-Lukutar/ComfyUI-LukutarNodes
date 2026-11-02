@@ -47,14 +47,18 @@ a zero-input seed generator with the same ``seed`` +
 	``history_size`` parameter (default 5) that keeps a rolling log of past
 	seeds rendered as copyable text below all other parameters via
 	`web/js/seed_history.js`; and the metadata/save additions — a new
-	``LUKUTAR_METADATA`` socket type (ordered ``dict[str, str]`` blocks)
-	served by **Save Image (Metadata)** (`nodes/save_image.py` +
-	`core/image_saver.py`, guarded PIL import — Pillow from ComfyUI runtime,
-	JXL only with optional `pillow-jxl-plugin`; relative paths resolve against
-	ComfyUI root; collision suffix `_00001`, … per format; per-format metadata
-	embedding: PNG tEXt chunks, JPG/WEBP/JXL EXIF UserComment
-	`UNICODE\0`+UTF-16 JSON, TIFF ImageDescription JSON, BMP none; BMP hides
-	the metadata input socket via `web/js/save_image.js`), the metadata trio in
+		``LUKUTAR_METADATA`` socket type (ordered ``dict[str, str]`` blocks)
+		served by **Save Image (Metadata)** (`nodes/save_image.py` +
+		`core/image_saver.py`, guarded PIL import — Pillow from ComfyUI runtime;
+		relative paths resolve against ComfyUI root; collision suffix
+		`_00001`, … per format; per-format metadata embedding: PNG tEXt chunks,
+		JPG/WEBP EXIF UserComment `UNICODE\0`+UTF-16 JSON, TIFF ImageDescription
+		JSON, BMP none; BMP hides the metadata input socket via
+		`web/js/save_image.js`) and the dedicated **Save Image JXL** node
+		(`nodes/save_image_jxl.py`, backed by `pillow-jxl-plugin` from
+		`requirements.txt`; full lossy/lossless encoder params — loss, quality,
+		effort, decoding_speed, use_container, use_original_profile, num_threads,
+		compress_metadata; metadata via EXIF box); the metadata trio in
 	`nodes/metadata.py`/`core/metadata.py` (Blocks: static 16 name/value pairs
 	+ `web/js/metadata_blocks.js` visibility control; Standard: hidden PROMPT +
 	EXTRA_PNGINFO inputs for workflow/prompt/datetime entries; Merge: empty
@@ -119,8 +123,8 @@ mypy --explicit-package-bases core
 ```
 
 The pack is **not pip-installed**; it is cloned into `ComfyUI/custom_nodes`.
-`requirements.txt` carries only `opencv-python` — torch and numpy come
-from the ComfyUI runtime. The `[project]`/`[tool.comfy]` tables in
+`requirements.txt` carries `opencv-python` and `pillow-jxl-plugin` —
+torch and numpy come from the ComfyUI runtime. The `[project]`/`[tool.comfy]` tables in
 `pyproject.toml` are registry + package metadata (no pip semantics);
 pytest/ruff/mypy config lives in its tool sections.
 
