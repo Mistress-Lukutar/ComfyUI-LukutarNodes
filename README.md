@@ -54,6 +54,21 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **Merge Metadata** — merge several LUKUTAR_METADATA blocks into one
   via dynamic SEGS-Concat-style inputs
   (`Lukutar/Metadata`).
+- **A1111 Parameters** — assemble an A1111-style `parameters` infotext
+  from positive/negative prompts, version, and metadata-block settings
+  (`Lukutar/Metadata`).
+- **A1111 Sampling** — emit sampling parameters (steps, sampler, CFG,
+  seed, size, clip skip) as a metadata block
+  (`Lukutar/Metadata`).
+- **A1111 Hires Fix** — emit high-resolution-fix parameters (upscaler,
+  upscale factor, hires steps, denoising) as a metadata block
+  (`Lukutar/Metadata`).
+- **A1111 Model Info** — look up a model file's SHA-256 prefix and emit
+  type-specific name/hash entries with on-disk caching
+  (`Lukutar/Metadata`).
+- **A1111 Lora Hashes** — hash up to eight LoRA files and emit a single
+  `"Lora hashes"` entry in A1111 format
+  (`Lukutar/Metadata`).
 - **Paste (Clipspace, Keep Mask)** — context-menu item for image upload
   nodes: paste a clipspace image while keeping the node's painted mask
   (frontend extension, no node).
@@ -897,6 +912,187 @@ None — all inputs are dynamic.
   (same trade-off as Set/Get Bundle). Hand-written API prompts may pass
   `meta_1`, `meta_2`, … links, which the backend orders by natural
   `meta_N` order.
+
+### A1111 Parameters
+
+Builds an A1111-style generation-parameter infotext string and a
+corresponding LUKUTAR_METADATA block (`Lukutar/Metadata`). The output
+is byte-compatible with A1111 / Forge PNG-info parsers: the positive
+prompt line, an optional `"Negative prompt:"` line, and a settings
+block where every key/value pair is rendered as `key: value`, joined by
+`, `. Values that contain a comma, newline or colon are JSON-encoded
+(`quote_a1111`); everything else is emitted verbatim.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| positive | STRING (multiline) | "" | Positive prompt text; may span multiple lines. Always present in the output. |
+| negative | STRING (multiline) | "" | Negative prompt text. The `"Negative prompt:"` line is omitted when this field is empty. |
+| version | STRING | "" | Value for the trailing `"Version:"` entry (e.g. `"forge-0.9.1"`). Omitted when empty. |
+
+#### Inputs (dynamic)
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| + add | LUKUTAR_METADATA | — | Always-present free input. Connecting a wire onto it claims the lowest unused `meta_N` slot and spawns the next free input. Slots are processed in `meta_1`, `meta_2`, … order, which determines settings-key order in the output. Disconnecting an auto-named slot collapses it. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| metadata | LUKUTAR_METADATA | Single-entry dict `{"parameters": <infotext>}` when the infotext is non-empty; empty dict when the whole text would be blank (both prompts empty and no settings). |
+| parameters_text | STRING | The raw A1111-style infotext string, including the prompt lines and settings block. |
+
+#### Behaviour
+
+- Settings keys come from whatever metadata blocks are wired into the
+  `meta_N` inputs; their order in the output follows slot number
+  (`meta_1` before `meta_2`, …). A `"Version"` key is appended last if
+  the `version` parameter is non-empty.
+- The infotext format: `<positive>\n<Negative prompt: <negative>>\n<key: value, key: value>` — each settings entry uses `quote_a1111()` on its value, which JSON-encodes values containing `,`, `\n`, or `:` and leaves simple strings untouched.
+- The `"Negative prompt:"` line appears only when the `negative` field
+  is non-empty (truthy check, no strip).
+- When the resulting text is entirely empty (no positive, no negative,
+  no settings), the `metadata` output key `"parameters"` is omitted and
+  `parameters_text` is `""`.
+
+#### Recommended graph
+
+Wire **A1111 Sampling**, **A1111 Hires Fix**, **A1111 Model Info** and
+**A1111 Lora Hashes** into the metadata slots of this node. Feed the seed
+from a **Seed History** node (the `seed` widget on A1111 Sampling is
+display-only; its `control_after_generate` is added by the frontend).
+Pass positive/negative prompts from **Prompt Annotate**'s clean STRING
+output or type them directly. Merge the resulting `"parameters"` metadata
+block with Standard Metadata (or any other blocks) through **Merge
+Metadata** before a save node.
+
+### A1111 Sampling
+
+Emits standard A1111 settings entries for sampler configuration as a
+LUKUTAR_METADATA block (`Lukutar/Metadata`). Keys are emitted in the
+fixed A1111 order: Steps, Sampler, CFG scale, Seed, [Size], [Clip skip].
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| steps | INT | 20 | Number of inference steps (1–150). |
+| sampler | COMBO | DPM++ 2M Karras | Sampler algorithm. The combo lists 25 common A1111 samplers; arbitrary names can be added via the node's context menu → "convert widget to input". |
+| cfg | FLOAT | 7.0 | Classifier-free guidance scale (0–30, step 0.1). Rendered without trailing zeros (`7` not `7.0`). |
+| seed | INT | 0 | Generation seed (0 … 2⁶⁴−1). The frontend adds its own `control_after_generate` widget; declaring it server-side would conflict with the Seed History node's handling. |
+| width | INT | 1024 | Image width in pixels (0–16384, step 8). `0` on either dimension omits the "Size" entry entirely. |
+| height | INT | 1024 | Image height in pixels (0–16384, step 8). |
+| clip_skip | INT | 0 | CLIP skip value (0–12). `0` = omit the "Clip skip" entry; values ≥ 1 are emitted as integers. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| metadata | LUKUTAR_METADATA | Dict with keys `Steps`, `Sampler`, `CFG scale`, `Seed`, optionally `Size` (when both width and height are > 0) and optionally `Clip skip` (when ≥ 1). CFG scale uses Python's `:g` format specifier so trailing zeros are dropped. |
+
+### A1111 Hires Fix
+
+Emits standard A1111 settings entries for high-resolution fix as a
+LUKUTAR_METADATA block (`Lukutar/Metadata`). Keys are emitted in this
+fixed order: Hires upscale, Hires upscaler, [Hires steps], Denoising strength.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| upscaler | STRING | 4x-UltraSharp | Upscaler display name (free text). Matches whatever A1111/Forge shows in its upscaler dropdown. |
+| upscale | FLOAT | 2.0 | Upscaling factor (1–8, step 0.05). Rendered as `"2.0"` with one decimal place (A1111 convention). |
+| hires_steps | INT | 10 | Hires pass steps (0–150). `0` = omit the "Hires steps" entry. |
+| denoising | FLOAT | 0.45 | Denoising strength for the hires pass (0–1, step 0.01). Rendered as `"0.45"` with one decimal place. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| metadata | LUKUTAR_METADATA | Dict with keys `Hires upscale` (float string), `Hires upscaler`, optionally `Hires steps` (integer when ≥ 1), and `Denoising strength` (float string). Values use `str(float(value))` so integer inputs like `2` produce `"2.0"`. |
+
+### A1111 Model Info
+
+Looks up a model file by type, computes its SHA-256 prefix, and emits
+type-specific name/hash entries matching A1111 conventions
+(`Lukutar/Metadata`). Four model types are supported: Checkpoint, VAE,
+LoRA, and Embedding.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| model_type | COMBO | Checkpoint | Which model folder to list. The web extension refills the file combo when this changes; without it the combo shows checkpoints only. |
+| model_name | COMBO | (first checkpoint) | Model file to look up. Populated from `folder_paths` at node load time. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| model_name | STRING | Display name: checkpoint/LoRA/embedding stem (extension removed), VAE name with extension preserved — matching A1111's own convention. |
+| model_hash | STRING | First 10 hex characters of the file's SHA-256 digest. |
+| metadata | LUKUTAR_METADATA | Type-specific entries: Checkpoint → `"Model hash"` + `"Model"`; VAE → `"VAE hash"` + `"VAE"`; LoRA → `"Lora hashes": "name: hash"`; Embedding → `"TI hashes": "name: hash"`. |
+
+#### Behaviour
+
+- **Hash computation.** The SHA-256 is computed by streaming the file in
+  1 MiB chunks (never loads the full file into memory). Hashing a
+  multi-GB checkpoint takes tens of seconds **once**; subsequent uses
+  read from an on-disk cache.
+- **Cache.** A `ModelHashCache` singleton persists entries to
+  `a1111_hash_cache.json` in the pack root directory (one level above
+  `core/`). Entries are keyed by absolute path and validated against the
+  file's current mtime and size — if either changes, the cache entry is
+  invalidated and the hash is recomputed. The cache writes atomically
+  (temp file + rename).
+- **Web extension.** The frontend (`web/js/a1111_model_info.js`) listens
+  for `model_type` changes and refills the `model_name` combo via
+  `/models/<folder>` — so switching from Checkpoint to LoRA shows only
+  `.safetensors`/`.sft` files in the loras folder. Without the extension
+  the combo always lists checkpoints (the backend default).
+- **Runtime requirement.** The node raises a `RuntimeError` when called
+  outside the ComfyUI runtime (`folder_paths` is `None`), since it needs
+  the model directory lookup.
+
+### A1111 Lora Hashes
+
+Computes SHA-256 prefixes for up to eight LoRA files and emits a single
+`"Lora hashes"` metadata entry in A1111 format
+(`Lukutar/Metadata`). The `"Lora hashes"` value is a comma-separated
+list of `"name: hash"` pairs, JSON-encoded (quoted) because it contains
+colons and commas — byte-compatible with A1111's own parser.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| lora_1 … lora_8 | COMBO | None | LoRA file from the `loras` folder. `"None"` (the first entry) marks an unused slot. The web extension hides unused slots and always shows one free trailing slot; without it all eight combos are visible. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| metadata | LUKUTAR_METADATA | Single-entry dict `{"Lora hashes": "name: hash, name: hash"}` (quoted via `quote_a1111`). Empty dict when all slots are `"None"` or unconnected. |
+| lora_hashes | STRING | The same quoted text as the metadata value, for inspection or manual editing. |
+
+#### Behaviour
+
+- Slots are processed in numbered order (`lora_1` through `lora_8`).
+  Entries with `"None"` or blank values are skipped entirely. If no
+  real slots are active the node returns empty outputs without touching
+  `folder_paths`.
+- **Why not multiple Model Info nodes?** Each A1111 Model Info emits a
+  `"Lora hashes"` key, and **Merge Metadata** resolves duplicate keys
+  by later-wins — so wiring two Model Info nodes would clobber the first
+  node's entry. This node aggregates all hashes into one quoted value in
+  a single metadata block, avoiding that conflict entirely.
+- **Runtime requirement.** The node raises a `RuntimeError` when called
+  outside the ComfyUI runtime and at least one non-"None" slot is active.
+- **Web extension.** The frontend (`web/js/a1111_lora_hashes.js`) hides
+  every unclaimed slot and shows exactly one free trailing combo, so the
+  user can keep adding LoRA inputs without seeing eight blank dropdowns.
 
 ### Paste (Clipspace, Keep Mask)
 

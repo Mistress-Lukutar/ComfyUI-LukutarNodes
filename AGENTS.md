@@ -65,7 +65,17 @@ a zero-input seed generator with the same ``seed`` +
 	+ `web/js/metadata_blocks.js` visibility control; Standard: hidden PROMPT +
 	EXTRA_PNGINFO inputs for workflow/prompt/datetime entries; Merge: empty
 	INPUT_TYPES with `meta_N` kwargs + `web/js/metadata_merge.js` growth
-	mirroring the bundle pair).
+	mirroring the bundle pair); and the A1111 parameters set —
+	`core/a1111_parameters.py` engine (`quote_a1111`/`build_parameters`/`compute_model_hash` +
+	ModelHashCache with on-disk `a1111_hash_cache.json`; pack-root path, lazy-init singleton;
+	streaming SHA-256 in 1 MiB chunks, cache keyed by (path, mtime, size), atomic writes);
+	`nodes/a1111.py` five nodes (`A1111ParametersNode`, `A1111SamplingNode`,
+	`A1111HiresFixNode`, `A1111ModelInfoNode`, `A1111LoraHashesNode`) in category
+	`Lukutar/Metadata`; guarded `folder_paths` import (raises `RuntimeError` outside runtime
+	for Model Info / Lora Hashes); `web/js/a1111_model_info.js` refills model_name combo on
+	type change via `/models/<folder>`; `web/js/a1111_lora_hashes.js` hides unused
+	`lora_N` combos and shows one free trailing slot. Cache file is runtime-created and
+	gitignored (not tracked in the repo).
 The nodes' behavioral contract (inputs, batch semantics, auto-tune,
 progress reporting, markup grammar) is specified in `README.md`; keep
 the README in sync with any behavior change.

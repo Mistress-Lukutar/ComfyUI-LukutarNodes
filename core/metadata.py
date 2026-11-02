@@ -154,23 +154,54 @@ def standard_metadata(
 # Natural-sort helpers for merge-node kwargs ordering                #
 # ------------------------------------------------------------------ #
 
+#: Compiled regex patterns cached per prefix (keyed by prefix string).
+_NUMBERED_RE_CACHE: dict[str, re.Pattern[str]] = {}
 
-def _meta_input_key(name: str) -> tuple[int, int, str]:
-    '''Sort key for ``meta_N`` names.
 
-    Names matching ``^meta_(\\d+)$`` sort first ascending by their
-    integer *N*; all other names sort after alphabetically.
+def _numbered_input_key(name: str, prefix: str) -> tuple[int, int, str]:
+    '''Sort key for ``{prefix}N`` names.
+
+    Names matching ``^{prefix}(\\d+)$`` sort first ascending by their
+    integer suffix; all other names sort after alphabetically.
 
     Args:
-        name: The kwarg name to produce a sort key for.
+        name: The name to produce a sort key for.
+        prefix: The literal prefix before the numeric suffix (e.g.
+            ``"meta_"``).
 
     Returns:
         A tuple suitable for use in ``sorted()`` / ``list.sort()``.
     '''
-    match = _META_INPUT_RE.fullmatch(name)
+    pattern = _NUMBERED_RE_CACHE.get(prefix)
+    if pattern is None:
+        escaped_prefix = re.escape(prefix)
+        pattern = re.compile(rf"^{escaped_prefix}(\d+)$")
+        _NUMBERED_RE_CACHE[prefix] = pattern
+
+    match = pattern.fullmatch(name)
     if match:
         return (0, int(match.group(1)), name)
     return (1, 0, name)
+
+
+def sort_numbered_inputs(
+    names: Iterable[str],
+    prefix: str = "meta_",
+) -> list[str]:
+    '''Natural-sort a collection of names by numeric suffix.
+
+    Names matching ``{prefix}N`` are sorted first in ascending order
+    by *N*; all other names follow, sorted alphabetically.
+
+    Args:
+        names: The names to sort.
+        prefix: The literal prefix before the numeric suffix (default
+            ``"meta_"``).
+
+    Returns:
+        A new list of names in natural sorted order.
+    '''
+    return sorted(names, key=lambda n: _numbered_input_key(n, prefix))
 
 
 def sort_meta_inputs(names: Iterable[str]) -> list[str]:
@@ -184,4 +215,4 @@ def sort_meta_inputs(names: Iterable[str]) -> list[str]:
     Returns:
         A new list of names in the desired iteration order.
     '''
-    return sorted(names, key=_meta_input_key)
+    return sort_numbered_inputs(names, "meta_")

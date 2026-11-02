@@ -9,3 +9,6 @@ __pycache__/
 node.zip
 # Scratch dumps from frontend source inspection
 .tmp_*
+
+# Runtime model-hash cache written by A1111 Model Info / Lora Hashes
+a1111_hash_cache.json

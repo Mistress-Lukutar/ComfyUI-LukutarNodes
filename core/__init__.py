@@ -8,6 +8,18 @@ Version: v0.6.0
 
 from __future__ import annotations
 
+from .a1111_parameters import (
+    A1111_SAMPLERS,
+    DEFAULT_SAMPLER,
+    HASH_CACHE_FILENAME,
+    MODEL_HASH_CHARS,
+    ModelHashCache,
+    a1111_float_str,
+    build_parameters,
+    compute_model_hash,
+    get_model_hash_cache,
+    quote_a1111,
+)
 from .color_matcher import (
     DEFAULT_EVAL_SIGMA,
     EVAL_METRICS,
@@ -48,6 +60,7 @@ from .group_switch import (
     parse_sort_order,
     sort_group_titles,
 )
+from .metadata import sort_meta_inputs, sort_numbered_inputs
 from .prompt_annotator import (
     DEFAULT_LABEL,
     EDIT_MODES,
@@ -74,6 +87,10 @@ from .segs_crop_fitter import (
 )
 
 __all__ = [
+    "A1111_SAMPLERS",
+    "DEFAULT_SAMPLER",
+    "HASH_CACHE_FILENAME",
+    "MODEL_HASH_CHARS",
     "COLOR_AUTO",
     "COLOR_MODES",
     "COLOR_SINGLE",
@@ -101,30 +118,38 @@ __all__ = [
     "MODE_EXACT",
     "PALETTE",
     "AnnotatedPrompt",
-    "ColorMatchError",
     "ColorMatcher",
+    "ColorMatchError",
     "Detection",
     "DetectionRenderError",
     "DetectionRenderer",
     "FittedRegion",
     "FrequencySplit",
     "GroupSwitchError",
+    "ModelHashCache",
     "PromptAnnotateError",
     "PromptSpan",
     "TuneResult",
+    "a1111_float_str",
+    "build_parameters",
     "check_disable_method",
+    "compute_model_hash",
     "edit_segment",
     "fit_crop_region",
     "format_caption",
+    "get_model_hash_cache",
     "labels_text",
     "order_states",
     "parse_annotated_prompt",
     "parse_group_states",
     "parse_sort_order",
+    "quote_a1111",
     "realign_mask",
     "scale_detections",
     "segment_text",
     "sort_group_titles",
+    "sort_meta_inputs",
+    "sort_numbered_inputs",
     "to_impact_wildcard",
     "to_markup",
     "tune_sigma",

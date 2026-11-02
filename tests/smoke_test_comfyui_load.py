@@ -14,9 +14,12 @@ Run with ComfyUI's own python (no server launch required):
 from __future__ import annotations
 
 import collections
+import contextlib
 import importlib.util
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -309,6 +312,113 @@ def _validate_metadata_prompt(mappings: dict[str, type]) -> None:
         )
         assert ok, f"metadata prompt failed validation: {error}"
         assert outputs == ["4"], f"unexpected outputs: {outputs}"
+    finally:
+        sys.path.remove(str(COMFYUI_ROOT))
+
+
+def _validate_a1111_prompt(mappings: dict[str, type]) -> None:
+    '''Validate the A1111 metadata prompt chain end to end.
+
+    Builds: A1111Sampling (meta_1) + A1111HiresFix (meta_2) into
+    A1111Parameters, whose metadata output feeds MergeMetadata alongside
+    MetadataBlocks, then LukutarSaveImage.  Proves the LUKUTAR_METADATA
+    socket chains through undeclared kwargs and the ``*`` return bus.
+    '''
+    if not COMFYUI_ROOT.exists():
+        print("NOTE: ComfyUI root not found, skipping A1111 prompt validation e2e")
+        return
+    sys.path.insert(0, str(COMFYUI_ROOT))
+    try:
+        import asyncio
+
+        import execution
+
+        import nodes as comfy_nodes_a1111
+
+        for key in (
+            "A1111Sampling",
+            "A1111HiresFix",
+            "A1111Parameters",
+            "MetadataBlocks",
+            "MergeMetadata",
+            "LukutarSaveImage",
+        ):
+            if key in mappings:
+                comfy_nodes_a1111.NODE_CLASS_MAPPINGS[key] = mappings[key]
+
+        prompt = {
+            "1": {
+                "class_type": "EmptyImage",
+                "inputs": {
+                    "width": 8,
+                    "height": 8,
+                    "batch_size": 1,
+                    "color": 0,
+                },
+            },
+            "2": {
+                "class_type": "A1111Sampling",
+                "inputs": {
+                    "steps": 30,
+                    "sampler": "DPM++ 2M Karras",
+                    "cfg": 7.0,
+                    "seed": 3928472037,
+                    "width": 832,
+                    "height": 1216,
+                    "clip_skip": 2,
+                },
+            },
+            "3": {
+                "class_type": "A1111HiresFix",
+                "inputs": {
+                    "upscaler": "4x-UltraSharp",
+                    "upscale": 2.0,
+                    "hires_steps": 15,
+                    "denoising": 0.45,
+                },
+            },
+            "4": {
+                "class_type": "A1111Parameters",
+                "inputs": {
+                    "positive": "masterpiece, best quality, 1girl",
+                    "negative": "worst quality",
+                    "version": "forge-0.9.1",
+                    "meta_1": ["2", 0],
+                    "meta_2": ["3", 0],
+                },
+            },
+            "5": {
+                "class_type": "MetadataBlocks",
+                "inputs": {
+                    "num_blocks": 1,
+                    "name_1": "env",
+                    "value_1": "smoke-test",
+                },
+            },
+            "6": {
+                "class_type": "MergeMetadata",
+                "inputs": {
+                    "meta_1": ["4", 0],
+                    "meta_2": ["5", 0],
+                },
+            },
+            "7": {
+                "class_type": "LukutarSaveImage",
+                "inputs": {
+                    "images": ["1", 0],
+                    "path": "output",
+                    "filename": "a1111_smoke",
+                    "format": "PNG",
+                    "quality": 95,
+                    "metadata": ["6", 0],
+                },
+            },
+        }
+        ok, error, outputs, _node_errors = asyncio.run(
+            execution.validate_prompt("lukutar-a1111-smoke", prompt, None)
+        )
+        assert ok, f"A1111 metadata prompt failed validation: {error}"
+        assert outputs == ["7"], f"unexpected A1111 outputs: {outputs}"
     finally:
         sys.path.remove(str(COMFYUI_ROOT))
 
@@ -649,6 +759,9 @@ def main() -> None:
     # LUKUTAR_METADATA links pass ComfyUI's validator.
     _validate_metadata_prompt(mappings)
 
+    # A1111 metadata chain: Sampling + HiresFix → Parameters → Merge → Save.
+    _validate_a1111_prompt(mappings)
+
     # Group Switch node: validate + order the states payload the way the
     # web extension serializes it, then prove the prompt contract end to
     # end (GROUP_STATES output feeds the wildcard Set/Get value input).
@@ -773,6 +886,208 @@ def main() -> None:
             sys.path.remove(str(COMFYUI_ROOT))
 
     # ------------------------------------------------------------------ #
+    # Direct-contract: A1111Sampling, A1111HiresFix, A1111Parameters      #
+    # ------------------------------------------------------------------ #
+
+    # A1111Sampling — exact metadata dict contract.
+    sampling_node = mappings["A1111Sampling"]()
+    (sampling_meta,) = sampling_node.build(
+        steps=30,
+        sampler="DPM++ 2M Karras",
+        cfg=7.0,
+        seed=3928472037,
+        width=832,
+        height=1216,
+        clip_skip=2,
+    )
+    assert sampling_meta == {
+        "Steps": "30",
+        "Sampler": "DPM++ 2M Karras",
+        "CFG scale": "7",
+        "Seed": "3928472037",
+        "Size": "832x1216",
+        "Clip skip": "2",
+    }, f"A1111Sampling metadata mismatch: {sampling_meta!r}"
+
+    # A1111HiresFix — exact metadata dict contract.
+    hires_node = mappings["A1111HiresFix"]()
+    (hires_meta,) = hires_node.build(
+        upscaler="4x-UltraSharp",
+        upscale=2.0,
+        hires_steps=15,
+        denoising=0.45,
+    )
+    assert hires_meta == {
+        "Hires upscale": "2.0",
+        "Hires upscaler": "4x-UltraSharp",
+        "Hires steps": "15",
+        "Denoising strength": "0.45",
+    }, f"A1111HiresFix metadata mismatch: {hires_meta!r}"
+
+    # A1111Parameters — combined build with sampling + hires metadata blocks.
+    params_node = mappings["A1111Parameters"]()
+    (params_meta, params_text) = params_node.build(
+        positive="masterpiece, best quality, 1girl",
+        negative="worst quality",
+        version="forge-0.9.1",
+        meta_1=sampling_meta,
+        meta_2=hires_meta,
+    )
+    expected_text = (
+        "masterpiece, best quality, 1girl\n"
+        "Negative prompt: worst quality\n"
+        "Steps: 30, Sampler: DPM++ 2M Karras, CFG scale: 7, "
+        "Seed: 3928472037, Size: 832x1216, Clip skip: 2, "
+        "Hires upscale: 2.0, Hires upscaler: 4x-UltraSharp, "
+        "Hires steps: 15, Denoising strength: 0.45, "
+        "Version: forge-0.9.1"
+    )
+    assert params_text == expected_text, (
+        f"A1111Parameters text mismatch:\n"
+        f"  expected: {expected_text!r}\n"
+        f"  got:      {params_text!r}"
+    )
+    assert params_meta == {"parameters": expected_text}, (
+        f"A1111Parameters metadata mismatch: {params_meta!r}"
+    )
+
+    # A1111Parameters — empty inputs return empty contract.
+    (empty_meta, empty_text) = params_node.build(
+        positive="", negative="", version=""
+    )
+    assert empty_meta == {}, f"empty parameters metadata: {empty_meta!r}"
+    assert empty_text == "", f"empty parameters text: {empty_text!r}"
+
+    # ------------------------------------------------------------------ #
+    # Direct-contract: A1111ModelInfo + A1111LoraHashes (guarded)         #
+    # ------------------------------------------------------------------ #
+
+    # Import pack modules BEFORE inserting COMFYUI_ROOT on sys.path,
+    # otherwise ``import nodes.a1111`` resolves to ComfyUI's nodes pkg.
+    _pack_path = str(PACK_ROOT)
+    if _pack_path not in sys.path:
+        sys.path.insert(0, _pack_path)
+
+    import importlib  # noqa: E402
+
+    _a1111_mod = importlib.import_module(  # noqa: E402
+        "custom_nodes.ComfyUI-LukutarNodes.nodes.a1111"
+    )
+    _core_mod = importlib.import_module(  # noqa: E402
+        "custom_nodes.ComfyUI-LukutarNodes.core.a1111_parameters"
+    )
+
+    ModelHashCache = _core_mod.ModelHashCache  # noqa: F811
+    compute_model_hash = _core_mod.compute_model_hash  # noqa: F811
+
+    if COMFYUI_ROOT.exists():
+        sys.path.insert(0, str(COMFYUI_ROOT))
+        try:
+            import folder_paths as comfy_fp_a1111
+
+            # Patch get_model_hash_cache to use a temp-file cache.
+            _tmp_cache_path = tempfile.mktemp(suffix=".json")
+            _fresh_cache = ModelHashCache(_tmp_cache_path)
+            _orig_get_cache = _a1111_mod.get_model_hash_cache
+
+            def _patched_get_cache() -> ModelHashCache:
+                return _fresh_cache
+
+            _a1111_mod.get_model_hash_cache = _patched_get_cache  # type: ignore[assignment]
+
+            try:
+                # A1111ModelInfo — find smallest checkpoint < 100 MB.
+                ckpt_files = comfy_fp_a1111.get_filename_list("checkpoints")
+                if ckpt_files:
+                    _small_ckpt = min(
+                        (f for f in ckpt_files),
+                        key=lambda f: os.path.getsize(
+                            comfy_fp_a1111.get_full_path("checkpoints", f)
+                        ),
+                    )
+                    _ckpt_size = os.path.getsize(
+                        comfy_fp_a1111.get_full_path("checkpoints", _small_ckpt)
+                    )
+                    if _ckpt_size <= 100 * 1024 * 1024:
+                        model_node = mappings["A1111ModelInfo"]()
+                        (ret_name, ret_hash, ret_meta) = model_node.build(
+                            model_type="Checkpoint",
+                            model_name=_small_ckpt,
+                        )
+                        expected_hash = compute_model_hash(
+                            comfy_fp_a1111.get_full_path("checkpoints", _small_ckpt)
+                        )
+                        assert ret_hash == expected_hash, (
+                            f"Model hash mismatch: {ret_hash!r} != "
+                            f"{expected_hash!r}"
+                        )
+                        import os as _os
+
+                        expected_name = _os.path.splitext(_small_ckpt)[0]
+                        assert ret_name == expected_name, (
+                            f"Model name mismatch: {ret_name!r} != "
+                            f"{expected_name!r}"
+                        )
+                        assert list(ret_meta.keys()) == [
+                            "Model hash",
+                            "Model",
+                        ], f"unexpected metadata keys: {list(ret_meta.keys())}"
+                    else:
+                        print(
+                            f"A1111 Model Info node skipped (smallest checkpoint "
+                            f"{_ckpt_size / (1024 * 1024):.1f} MB > 100 MB)"
+                        )
+                else:
+                    print("A1111 Model Info node skipped (no checkpoints found)")
+
+                # A1111LoraHashes — all-None contract.
+                lora_node = mappings["A1111LoraHashes"]()
+                (lora_meta, lora_text) = lora_node.build(
+                    lora_1="None",
+                    lora_2="None",
+                    lora_3="None",
+                    lora_4="None",
+                    lora_5="None",
+                    lora_6="None",
+                    lora_7="None",
+                    lora_8="None",
+                )
+                assert lora_meta == {}, (
+                    f"all-None LoRA metadata: {lora_meta!r}"
+                )
+                assert lora_text == "", f"all-None LoRA text: {lora_text!r}"
+
+                # A1111LoraHashes — real slot if loras folder has files.
+                lora_files = comfy_fp_a1111.get_filename_list("loras")
+                if lora_files:
+                    _first_lora = lora_files[0]
+                    (lora_meta2, lora_text2) = lora_node.build(
+                        **{"lora_1": _first_lora},
+                        lora_2="None",
+                        lora_3="None",
+                        lora_4="None",
+                        lora_5="None",
+                        lora_6="None",
+                        lora_7="None",
+                        lora_8="None",
+                    )
+                    assert "Lora hashes" in lora_meta2, (
+                        f"missing Lora hashes key: {lora_meta2!r}"
+                    )
+                    assert lora_text2 != "", (
+                        f"real LoRA should produce non-empty text: {lora_text2!r}"
+                    )
+                else:
+                    print("A1111 Lora Hashes node skipped (no LoRA files found)")
+
+            finally:
+                _a1111_mod.get_model_hash_cache = _orig_get_cache  # type: ignore[assignment]
+                with contextlib.suppress(OSError):
+                    os.unlink(_tmp_cache_path)
+        finally:
+            sys.path.remove(str(COMFYUI_ROOT))
+
+    # ------------------------------------------------------------------ #
     # E2E: LukutarSaveImage — save + metadata round-trip                  #
     # ------------------------------------------------------------------ #
     if COMFYUI_ROOT.exists():
@@ -784,8 +1099,6 @@ def main() -> None:
                 "LukutarSaveImage not registered"
             )
             assert "LukutarSaveImage" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
-
-            import tempfile
 
             save_node = mappings["LukutarSaveImage"]()
             fn_cfg = save_node.INPUT_TYPES()["required"]["filename"][1]

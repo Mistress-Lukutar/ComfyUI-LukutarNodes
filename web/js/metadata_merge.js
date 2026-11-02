@@ -18,9 +18,10 @@
 
 import { app } from "../../../scripts/app.js";
 
-console.info("[LukutarNodes.MergeMetadata] extension loaded");
+console.info("[LukutarNodes.MetadataMerge] extension loaded");
 
-const NODE_NAME = "MergeMetadata";
+/** Node types that share the metadata-merge slot-growth behaviour. */
+const NODE_NAMES = ["MergeMetadata", "A1111Parameters"];
 
 /** Prefix for auto-named metadata input sockets. */
 const INPUT_PREFIX = "meta_";
@@ -139,13 +140,13 @@ app.registerExtension({
   name: "LukutarNodes.MergeMetadata",
   afterConfigureGraph() {
     // After a workflow load, clean up stale unconnected slots and ensure
-    // the free "+ add" input exists on every MergeMetadata node.
+    // the free "+ add" input exists on every matching node.
     (app.graph?._nodes ?? []).forEach((node) => {
-      if (node.type === NODE_NAME) normalize(node);
+      if (NODE_NAMES.includes(node.type)) normalize(node);
     });
   },
   beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData?.name !== NODE_NAME) return;
+    if (!NODE_NAMES.includes(nodeData?.name)) return;
 
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {

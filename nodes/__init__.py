@@ -8,6 +8,13 @@ Version: v0.10.0
 
 from __future__ import annotations
 
+from .a1111 import (
+    A1111HiresFixNode,
+    A1111LoraHashesNode,
+    A1111ModelInfoNode,
+    A1111ParametersNode,
+    A1111SamplingNode,
+)
 from .bundle_variables import GetBundleNode, SetBundleNode
 from .color_match import ColorMatchNode
 from .group_switch import GroupSwitchNode
@@ -50,6 +57,11 @@ NODE_CLASS_MAPPINGS: dict[str, type] = {
     "MetadataBlocks": MetadataBlocksNode,
     "StandardMetadata": StandardMetadataNode,
     "MergeMetadata": MergeMetadataNode,
+    "A1111HiresFix": A1111HiresFixNode,
+    "A1111LoraHashes": A1111LoraHashesNode,
+    "A1111ModelInfo": A1111ModelInfoNode,
+    "A1111Parameters": A1111ParametersNode,
+    "A1111Sampling": A1111SamplingNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
@@ -69,6 +81,11 @@ NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
     "GetVariable": "Get Variable",
     "LukutarSaveImage": "Save Image (Metadata)",
     "LukutarSaveImageJxl": "Save Image JXL",
+    "A1111HiresFix": "A1111 Hires Fix",
+    "A1111LoraHashes": "A1111 Lora Hashes",
+    "A1111ModelInfo": "A1111 Model Info",
+    "A1111Parameters": "A1111 Parameters",
+    "A1111Sampling": "A1111 Sampling",
     "MetadataBlocks": "Metadata Blocks",
     "StandardMetadata": "Standard Metadata",
     "MergeMetadata": "Merge Metadata",
@@ -83,6 +100,11 @@ __all__ = [
     "AnnotationsWildcardNode",
     "ColorMatchNode",
     "GetVariableNode",
+    "A1111HiresFixNode",
+    "A1111LoraHashesNode",
+    "A1111ModelInfoNode",
+    "A1111ParametersNode",
+    "A1111SamplingNode",
     "GroupSwitchNode",
     "MergeMetadataNode",
     "MetadataBlocksNode",
