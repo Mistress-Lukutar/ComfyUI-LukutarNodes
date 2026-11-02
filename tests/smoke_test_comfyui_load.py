@@ -3,7 +3,7 @@ File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.7.1
+Version: v0.7.2
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -804,6 +804,18 @@ def main() -> None:
                     f"save returned unexpected: {ret1}"
                 )
 
+                # Verify the pass-through return shape: (images, metadata).
+                result1 = ret1.get("result")
+                assert isinstance(result1, tuple) and len(result1) == 2, (
+                    f"expected 2-tuple result, got {result1!r}"
+                )
+                assert result1[0] is small_tensor, (
+                    "save() must return the input tensor by identity"
+                )
+                assert result1[1] == {"desc": "smoke", "version": "1.1"}, (
+                    f"metadata mismatch in result: {result1[1]!r}"
+                )
+
                 # Locate the saved PNG — files may be under output/ or tmpdir
                 png_candidates = list(Path(tmpdir).rglob("LukutarSmoke.png"))
                 if not png_candidates:
@@ -840,6 +852,27 @@ def main() -> None:
                     png_candidates2 = list(output_dir.rglob("LukutarSmoke_00001.png"))
                 assert png_candidates2, "PNG collision file not found"
 
+                # Third save — PNG *without* metadata → result[1] must be None.
+                ret_no_meta = save_node.save(
+                    images=small_tensor,
+                    path=tmpdir,
+                    filename="LukutarSmokeNoMeta",
+                    format="PNG",
+                    quality=95,
+                )
+                assert ret_no_meta and "ui" in ret_no_meta
+                result_no_meta = ret_no_meta.get("result")
+                assert isinstance(result_no_meta, tuple) and len(result_no_meta) == 2, (
+                    f"expected 2-tuple result, got {result_no_meta!r}"
+                )
+                assert result_no_meta[0] is small_tensor, (
+                    "save() without metadata must still return input tensor by identity"
+                )
+                assert result_no_meta[1] is None, (
+                    f"result[1] must be None when no metadata "
+                    f"passed, got {result_no_meta[1]!r}"
+                )
+
                 # JPG save + EXIF round-trip
                 jpg_ret = save_node.save(
                     images=small_tensor,
@@ -850,6 +883,18 @@ def main() -> None:
                     metadata={"desc": "smoke", "version": "1.1"},
                 )
                 assert jpg_ret and "ui" in jpg_ret
+
+                # Verify the pass-through for the JPG call too.
+                result_jpg = jpg_ret.get("result")
+                assert isinstance(result_jpg, tuple) and len(result_jpg) == 2, (
+                    f"expected 2-tuple result, got {result_jpg!r}"
+                )
+                assert result_jpg[0] is small_tensor, (
+                    "JPG save() must return the input tensor by identity"
+                )
+                assert result_jpg[1] == {"desc": "smoke", "version": "1.1"}, (
+                    f"metadata mismatch in JPG result: {result_jpg[1]!r}"
+                )
 
                 jpg_candidates = list(Path(tmpdir).rglob("LukutarSmokeJPG.jpg"))
                 if not jpg_candidates:
@@ -934,6 +979,18 @@ def main() -> None:
                     )
                     assert ret_lossy and "ui" in ret_lossy
 
+                    # Verify the pass-through return shape: (images, metadata).
+                    result_lossy = ret_lossy.get("result")
+                    assert isinstance(result_lossy, tuple) and len(result_lossy) == 2, (
+                        f"expected 2-tuple result, got {result_lossy!r}"
+                    )
+                    assert result_lossy[0] is small_tensor, (
+                        "JXL save() must return the input tensor by identity"
+                    )
+                    assert result_lossy[1] == {"desc": "smoke"}, (
+                        f"metadata mismatch in JXL lossy result: {result_lossy[1]!r}"
+                    )
+
                     jxl_candidates = list(
                         Path(tmpdir).rglob("LukutarJxlSmoke.jxl")
                     )
@@ -988,6 +1045,20 @@ def main() -> None:
                     )
                     assert ret_lossless and "ui" in ret_lossless
 
+                    # Verify the pass-through for lossless call (no metadata).
+                    result_lossless = ret_lossless.get("result")
+                    assert isinstance(result_lossless, tuple) and len(
+                        result_lossless
+                    ) == 2, f"expected 2-tuple result, got {result_lossless!r}"
+                    assert result_lossless[0] is lossless_tensor, (
+                        "JXL lossless save() must return the input tensor by identity"
+                    )
+                    assert result_lossless[1] is None, (
+                        f"JXL lossless result[1] must be None "
+                        f"when no metadata passed, got "
+                        f"{result_lossless[1]!r}"
+                    )
+
                     ll_candidates = list(
                         Path(tmpdir).rglob("LukutarJxlLossless.jxl")
                     )
@@ -1017,7 +1088,8 @@ def main() -> None:
     if "LukutarSaveImageJxl" in mappings:
         _validate_jxl_prompt(mappings)
 
-    print("SMOKE TEST PASSED: nodes load and behave as expected")
+    print("SMOKE TEST PASSED: nodes load, save I/O works, and "
+          "save outputs (images, metadata) pass-through verified")
 
 
 if __name__ == "__main__":

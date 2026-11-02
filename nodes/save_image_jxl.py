@@ -3,7 +3,7 @@ File:   save_image_jxl.py
 Brief:  ComfyUI node for saving IMAGE batches as JPEG-XL with full encoder control.
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.1.0
+Version: v0.2.0
 '''
 
 from __future__ import annotations
@@ -34,6 +34,9 @@ class SaveImageJxlNode:
     Supports both lossy and lossless modes with full encoder control.
     Metadata is embedded as an EXIF box.  Raises a clear
     :exc:`RuntimeError` at execution when the plugin is missing.
+
+    Pass-through outputs: ``images`` (the original IMAGE tensor, untouched)
+    and ``metadata`` (the LUKUTAR_METADATA dict or ``None``).
     '''
 
     @classmethod
@@ -153,7 +156,8 @@ class SaveImageJxlNode:
             },
         }
 
-    RETURN_TYPES = ()
+    RETURN_TYPES = ("IMAGE", METADATA_TYPE)
+    RETURN_NAMES = ("images", "metadata")
     FUNCTION = "save"
     OUTPUT_NODE = True
     CATEGORY = "Lukutar/Image"
@@ -202,7 +206,8 @@ class SaveImageJxlNode:
             metadata: Optional metadata dict to embed as EXIF.
 
         Returns:
-            Dict with ``ui.images`` for the ComfyUI preview panel.
+            Dict with ``ui.images`` for the ComfyUI preview panel and
+            ``result`` = ``(images, metadata)`` pass-through.
         '''
         settings = JxlSettings(
             lossless=lossless,
@@ -220,4 +225,4 @@ class SaveImageJxlNode:
             frames, path, filename, settings, metadata, _comfy_base_dir()
         )
 
-        return {"ui": {"images": build_ui_entries(saved)}}
+        return {"ui": {"images": build_ui_entries(saved)}, "result": (images, metadata)}

@@ -40,11 +40,13 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
   `seed`/`control_after_generate` widgets plus a rolling log of used
   seeds rendered as copyable text (`Lukutar/Seeds`).
 - **Save Image (Metadata)** — save IMAGE batches to disk as PNG, JPG,
-  WEBP, TIFF or BMP with optional LUKUTAR_METADATA embedding
-  (`Lukutar/Image`).
+  WEBP, TIFF or BMP with optional LUKUTAR_METADATA embedding; passes the
+  input batch and metadata through as `images` + `metadata` outputs for
+  mid-graph chaining (`Lukutar/Image`).
 - **Save Image JXL** — dedicated JPEG-XL saver with lossy and lossless
   modes and full encoder control (loss, effort, decode speed, threads,
-  metadata via EXIF box) (`Lukutar/Image`).
+  metadata via EXIF box); passes the input batch and metadata through as
+  `images` + `metadata` outputs for mid-graph chaining (`Lukutar/Image`).
 - **Metadata Blocks** — build a LUKUTAR_METADATA dict from up to 16
   editable name/value pairs (`Lukutar/Metadata`).
 - **Standard Metadata** — emit workflow / prompt / datetime entries as
@@ -709,13 +711,23 @@ nodes and consumed by this save node.
   inside ComfyUI's output directory.
 - Without the web extension the node is fully functional — the metadata
   socket is always declared and can be wired manually.
+- The pass-through outputs let you chain this saver mid-graph: downstream
+  nodes receive the original batch and metadata without extra wiring.
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| images | IMAGE | The input batch, passed through untouched. |
+| metadata | LUKUTAR_METADATA | The input metadata blocks, passed through; `None` when the metadata input is not connected (Merge Metadata skips `None` blocks). |
 
 ### Save Image JXL
 
 Dedicated JPEG-XL saver backed by the `pillow-jxl-plugin` package
 (`Lukutar/Image`). Supports both lossy and lossless modes with full
-encoder control. No outputs; it is an `OUTPUT_NODE` that always
-re-executes (mirrors ComfyUI's own SaveImage behaviour).
+encoder control. Pass-through outputs (`images`, `metadata`) let you chain
+	the saver mid-graph without rewiring; it is an `OUTPUT_NODE` that always
+	re-executes (mirrors ComfyUI's own SaveImage behaviour).
 
 #### Parameters
 
@@ -762,6 +774,15 @@ re-executes (mirrors ComfyUI's own SaveImage behaviour).
   bundle libjxl, so no system `libjxl` or other JXL package is needed.
   If the plugin is missing at execution time the node raises a clear
   `RuntimeError` with the install command.
+- The pass-through outputs let you chain this saver mid-graph: downstream
+  nodes receive the original batch and metadata without extra wiring.
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| images | IMAGE | The input batch, passed through untouched. |
+| metadata | LUKUTAR_METADATA | The input metadata blocks, passed through; `None` when the metadata input is not connected (Merge Metadata skips `None` blocks). |
 
 ### Metadata Blocks
 

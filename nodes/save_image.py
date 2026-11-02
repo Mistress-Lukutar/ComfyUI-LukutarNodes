@@ -3,7 +3,7 @@ File:   save_image.py
 Brief:  ComfyUI node for saving IMAGE batches to disk in various formats.
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.2.0
+Version: v0.3.0
 '''
 
 from __future__ import annotations
@@ -86,6 +86,9 @@ class SaveImageNode:
     Writes one file per frame (appending a five-digit index when the
     batch has more than one frame).  Optionally embeds metadata key-value
     pairs into the file headers where supported.
+
+    Pass-through outputs: ``images`` (the original IMAGE tensor, untouched)
+    and ``metadata`` (the LUKUTAR_METADATA dict or ``None``).
     '''
 
     @classmethod
@@ -150,7 +153,8 @@ class SaveImageNode:
             },
         }
 
-    RETURN_TYPES = ()
+    RETURN_TYPES = ("IMAGE", METADATA_TYPE)
+    RETURN_NAMES = ("images", "metadata")
     FUNCTION = "save"
     OUTPUT_NODE = True
     CATEGORY = "Lukutar/Image"
@@ -184,7 +188,8 @@ class SaveImageNode:
             metadata: Optional metadata dict to embed.
 
         Returns:
-            Dict with ``ui.images`` for the ComfyUI preview panel.
+            Dict with ``ui.images`` for the ComfyUI preview panel and
+            ``result`` = ``(images, metadata)`` pass-through.
         '''
         if metadata and not supports_metadata(format):
             logger.warning(
@@ -197,4 +202,4 @@ class SaveImageNode:
             frames, path, filename, format, quality, metadata, _comfy_base_dir()
         )
 
-        return {"ui": {"images": build_ui_entries(saved)}}
+        return {"ui": {"images": build_ui_entries(saved)}, "result": (images, metadata)}
