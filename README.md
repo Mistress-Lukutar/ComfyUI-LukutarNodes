@@ -39,6 +39,16 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **Seed History** — a seed source with the built-in
   `seed`/`control_after_generate` widgets plus a rolling log of used
   seeds rendered as copyable text (`Lukutar/Seeds`).
+- **Save Image (Metadata)** — save IMAGE batches to disk in various
+  formats with optional LUKUTAR_METADATA embedding
+  (`Lukutar/Image`).
+- **Metadata Blocks** — build a LUKUTAR_METADATA dict from up to 16
+  editable name/value pairs (`Lukutar/Metadata`).
+- **Standard Metadata** — emit workflow / prompt / datetime entries as
+  a LUKUTAR_METADATA dict (`Lukutar/Metadata`).
+- **Merge Metadata** — merge several LUKUTAR_METADATA blocks into one
+  via dynamic SEGS-Concat-style inputs
+  (`Lukutar/Metadata`).
 - **Paste (Clipspace, Keep Mask)** — context-menu item for image upload
   nodes: paste a clipspace image while keeping the node's painted mask
   (frontend extension, no node).
@@ -641,6 +651,175 @@ A zero-input seed generator (`Lukutar/Seeds`): the same `seed` +
   extension falls back to a plain text widget; without the web assets
   the node still works as a plain seed source — the history is simply
   not displayed.
+
+### Save Image (Metadata)
+
+Saves an IMAGE batch to disk, one file per frame, in a chosen format
+(`Lukutar/Image`). Optionally embeds LUKUTAR_METADATA key-value pairs
+into the file headers where the format supports it. The node is an
+`OUTPUT_NODE` (always re-executes), so it never returns images — files
+are written directly to the filesystem.
+
+A new socket type, **LUKUTAR_METADATA**, carries an ordered set of named
+metadata blocks (`dict[str, str]`). It is produced by the three metadata
+nodes and consumed by this save node.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| images | IMAGE | — | Batch of frames to save. |
+| path | STRING | "output" | Target directory. Relative paths resolve against the ComfyUI root (`folder_paths.base_path`); absolute paths are used as-is. Missing directories are created automatically. |
+| filename | STRING | "Lukutar" | Base file name (extension added automatically). Forbidden characters for Windows filenames are replaced with underscores. |
+| format | COMBO | PNG | Output format: `PNG`, `JPG`, `JXL`, `WEBP`, `TIFF`, `BMP`. `JXL` appears only when the optional `pillow-jxl-plugin` package is installed (`pip install pillow-jxl-plugin`); it is NOT listed in `requirements.txt`. |
+| quality | INT | 95 | Compression quality, 1–100. Used by `JPG`, `WEBP`, `JXL`; ignored by `PNG`, `TIFF`, `BMP`. |
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| metadata | LUKUTAR_METADATA | — | Optional metadata blocks to embed. Hidden when the selected format cannot store metadata (e.g. BMP). |
+
+#### Behaviour
+
+- One file per frame is written. Multi-frame batches receive indexed
+  names: `filename_00000`, `filename_00001`, … (zero-padded five digits).
+  A single-frame batch keeps the bare filename without an index.
+- When a target file already exists, a collision suffix `_00001`,
+  `_00002`, … is appended so repeated runs never overwrite.
+- Metadata embedding per format:
+  - **PNG** — one `tEXt` chunk per key/value pair.
+  - **JPG / WEBP / JXL** — EXIF UserComment tag (0x9286); the payload
+    is `UNICODE\0` + UTF-16-encoded JSON of the metadata dict, matching
+    A1111-style readers.
+  - **TIFF** — ImageDescription tag (270) holding the JSON-encoded
+    metadata dict.
+  - **BMP** — no metadata embedding.
+- If the selected format cannot store metadata and the `metadata` input
+  is unconnected, the web extension hides the socket entirely. A still-
+  connected link triggers a backend warning at save time and degrades
+  gracefully (image saved without metadata).
+- If embedding metadata fails for any reason, the node retries saving
+  the image without metadata and logs a warning; it never raises on
+  that single frame.
+- The node preview (`ui.images`) lists saved files only when they land
+  inside ComfyUI's output directory.
+- Without the web extension the node is fully functional — the metadata
+  socket is always declared and can be wired manually.
+
+### Metadata Blocks
+
+Builds a LUKUTAR_METADATA dict from up to 16 editable name/value pairs
+(`Lukutar/Metadata`). Names are single-line strings; values support
+multiline text. The `num_blocks` parameter controls how many pairs are
+actually processed (default 3, range 1–16). Pairs with an empty (after
+trimming) name are skipped. Duplicate names resolve **later-wins**.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| num_blocks | INT | 3 | How many name/value pairs to process (1–16). The web extension hides pairs beyond this count on the canvas. |
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| name_1 … name_16 | STRING | "" | Block label for each pair. Empty names are skipped. |
+| value_1 … value_16 | STRING (multiline) | "" | Block content for each pair. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| metadata | LUKUTAR_METADATA | Ordered `dict[str, str]` of the processed pairs. |
+
+#### Behaviour
+
+- Names and values are trimmed of leading/trailing whitespace before
+  processing. Non-string values are coerced via `str()`.
+- The node statically declares all 16 name/value pair inputs so it
+  works fully without the web extension. The extension
+  (`web/js/metadata_blocks.js`) hides pairs beyond `num_blocks` at
+  runtime by setting `hidden=true` and `computeSize=()=>[0,-4]`, which
+  is the pack's established idiom — hidden widgets still serialize, so
+  values survive workflow save/load. Without the extension all 16 pairs
+  remain visible and the node functions normally.
+
+### Standard Metadata
+
+Emits standard ComfyUI metadata entries as a LUKUTAR_METADATA dict
+(`Lukutar/Metadata`). Three toggles control which keys are emitted, in
+a fixed order: `prompt`, `workflow`, `datetime`. Keys whose toggle is
+off (or whose hidden input is missing) are omitted entirely.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| include_workflow | BOOLEAN | true | Include the workflow JSON (ComfyUI's hidden EXTRA_PNGINFO). |
+| include_prompt | BOOLEAN | true | Include the execution prompt JSON (ComfyUI's hidden PROMPT input — the entire graph, not just this node's widgets). |
+| include_datetime | BOOLEAN | false | Add the current local date/time. |
+| datetime_format | STRING | "%Y-%m-%d %H:%M:%S" | strftime format used when `include_datetime` is on. Blank falls back to the default. |
+
+#### Hidden Inputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| prompt | PROMPT | ComfyUI's full execution prompt dict (the entire graph). |
+| extra_pnginfo | EXTRA_PNGINFO | ComfyUI's hidden extra PNG info dict. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| metadata | LUKUTAR_METADATA | Ordered `dict[str, str]` with the selected keys. |
+
+#### Behaviour
+
+- `prompt` — JSON-serialised ComfyUI execution prompt (the hidden
+  `PROMPT` input containing the entire graph).
+- `workflow` — JSON-serialised `extra_pnginfo["workflow"]`.
+- `datetime` — current **local** time formatted per `datetime_format`.
+- Keys are always emitted in this fixed order when their flag is on:
+  `prompt`, then `workflow`, then `datetime`.
+- Values are coerced via `str()` during JSON serialisation to handle
+  non-string types inside the prompt/workflow dicts.
+
+### Merge Metadata
+
+Merges several LUKUTAR_METADATA blocks into one, with duplicate keys
+resolved **later-wins** (blocks processed in slot-number order)
+(`Lukutar/Metadata`). The backend declares zero inputs; slots are grown
+client-side by `web/js/metadata_merge.js` using the same SEGS-Concat /
+Set-Bundle growth mechanism.
+
+#### Parameters
+
+None — all inputs are dynamic.
+
+#### Inputs (dynamic)
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| + add | LUKUTAR_METADATA | — | Always-present free input. Connecting a wire onto it claims the lowest unused `meta_N` slot and spawns the next free input. Disconnecting an auto-named slot collapses it. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| metadata | LUKUTAR_METADATA | Merged dict; blocks processed in `meta_1`, `meta_2`, … order, later keys overriding earlier ones. |
+
+#### Behaviour
+
+- Slots are named `meta_1`, `meta_2`, … (up to 16). The backend sorts
+  incoming kwargs by natural `meta_N` order and merges sequentially.
+- `None` inputs are skipped during merge. All values are coerced via
+  `str()`.
+- Without the web extension the node is not wirable from the canvas
+  (same trade-off as Set/Get Bundle). Hand-written API prompts may pass
+  `meta_1`, `meta_2`, … links, which the backend orders by natural
+  `meta_N` order.
 
 ### Paste (Clipspace, Keep Mask)
 

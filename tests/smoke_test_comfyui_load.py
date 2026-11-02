@@ -232,6 +232,86 @@ def _validate_bundle_prompt(mappings: dict[str, type]) -> None:
         sys.path.remove(str(COMFYUI_ROOT))
 
 
+def _validate_metadata_prompt(mappings: dict[str, type]) -> None:
+    '''Validate a prompt wired the way the metadata web extension serializes it.
+
+    Builds: MetadataBlocks → MergeMetadata (meta_1/meta_2 links) →
+    LukutarSaveImage (metadata link to Merge).  The meta_1/meta_2 inputs
+    are NOT declared in MergeMetadataNode.INPUT_TYPES — they arrive as
+    undeclared kwargs, same pattern as Set/Get Bundle slots.
+    '''
+    if not COMFYUI_ROOT.exists():
+        print("NOTE: ComfyUI root not found, skipping metadata prompt validation e2e")
+        return
+    sys.path.insert(0, str(COMFYUI_ROOT))
+    try:
+        import asyncio
+
+        import execution
+
+        import nodes as comfy_nodes
+
+        for key in ("MetadataBlocks", "MergeMetadata", "LukutarSaveImage"):
+            comfy_nodes.NODE_CLASS_MAPPINGS[key] = mappings[key]
+
+        prompt = {
+            "0": {
+                "class_type": "EmptyImage",
+                "inputs": {
+                    "width": 8,
+                    "height": 8,
+                    "batch_size": 1,
+                    "color": 0,
+                },
+            },
+            "1": {
+                "class_type": "MetadataBlocks",
+                "inputs": {
+                    "num_blocks": 2,
+                    "name_1": "env",
+                    "value_1": "production",
+                    "name_2": "model",
+                    "value_2": "sd-xl",
+                },
+            },
+            "2": {
+                "class_type": "MetadataBlocks",
+                "inputs": {
+                    "num_blocks": 2,
+                    "name_1": "model",
+                    "value_1": "sdxl-v2",
+                    "name_2": "rev",
+                    "value_2": "beta",
+                },
+            },
+            "3": {
+                "class_type": "MergeMetadata",
+                "inputs": {
+                    "meta_1": ["1", 0],
+                    "meta_2": ["2", 0],
+                },
+            },
+            "4": {
+                "class_type": "LukutarSaveImage",
+                "inputs": {
+                    "images": ["0", 0],
+                    "path": "output",
+                    "filename": "metadata_smoke",
+                    "format": "PNG",
+                    "quality": 95,
+                    "metadata": ["3", 0],
+                },
+            },
+        }
+        ok, error, outputs, _node_errors = asyncio.run(
+            execution.validate_prompt("lukutar-metadata-smoke", prompt, None)
+        )
+        assert ok, f"metadata prompt failed validation: {error}"
+        assert outputs == ["4"], f"unexpected outputs: {outputs}"
+    finally:
+        sys.path.remove(str(COMFYUI_ROOT))
+
+
 def main() -> None:
     pack = load_pack()
     mappings = getattr(pack, "NODE_CLASS_MAPPINGS", None)
@@ -506,6 +586,10 @@ def main() -> None:
 
     _validate_bundle_prompt(mappings)
 
+    # Metadata nodes: undeclared-kwargs slot inputs (meta_1/meta_2) and the
+    # LUKUTAR_METADATA links pass ComfyUI's validator.
+    _validate_metadata_prompt(mappings)
+
     # Group Switch node: validate + order the states payload the way the
     # web extension serializes it, then prove the prompt contract end to
     # end (GROUP_STATES output feeds the wildcard Set/Get value input).
@@ -628,6 +712,132 @@ def main() -> None:
             assert outputs == ["4"], f"unexpected outputs: {outputs}"
         finally:
             sys.path.remove(str(COMFYUI_ROOT))
+
+    # ------------------------------------------------------------------ #
+    # E2E: LukutarSaveImage — save + metadata round-trip                  #
+    # ------------------------------------------------------------------ #
+    if COMFYUI_ROOT.exists():
+        sys.path.insert(0, str(COMFYUI_ROOT))
+        try:
+            from PIL import Image as PILImage  # noqa: F401
+
+            assert "LukutarSaveImage" in mappings, (
+                "LukutarSaveImage not registered"
+            )
+            assert "LukutarSaveImage" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
+
+            import tempfile
+
+            save_node = mappings["LukutarSaveImage"]()
+            small_tensor = torch.rand(1, 8, 8, 3)  # B,H,W,3 float [0,1]
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # First save — PNG with metadata
+                ret1 = save_node.save(
+                    images=small_tensor,
+                    path=tmpdir,
+                    filename="LukutarSmoke",
+                    format="PNG",
+                    quality=95,
+                    metadata={"desc": "smoke", "version": "1.1"},
+                )
+                assert ret1 and "ui" in ret1 and "images" in ret1["ui"], (
+                    f"save returned unexpected: {ret1}"
+                )
+
+                # Locate the saved PNG — files may be under output/ or tmpdir
+                png_candidates = list(Path(tmpdir).rglob("LukutarSmoke.png"))
+                if not png_candidates:
+                    # ComfyUI SaveImageNode writes to its own output dir;
+                    # check there too.
+                    import folder_paths as comfy_fp
+
+                    base = getattr(comfy_fp, "base_path", Path.cwd())
+                    output_dir = Path(base) / "output"
+                    png_candidates = list(output_dir.rglob("LukutarSmoke.png"))
+                assert png_candidates, "PNG file not found after save"
+                png_path = png_candidates[0]
+
+                # Verify PIL reads back the tEXt chunks
+                with PILImage.open(png_path) as img:
+                    info = getattr(img, "info", {})
+                    keys = list(info.keys())
+                    assert "desc" in info, f"desc missing from PNG: {keys}"
+                    assert "version" in info, f"version missing from PNG: {keys}"
+
+                # Second save with identical args → collision suffix _00001
+                ret2 = save_node.save(
+                    images=small_tensor,
+                    path=tmpdir,
+                    filename="LukutarSmoke",
+                    format="PNG",
+                    quality=95,
+                    metadata={"desc": "smoke", "version": "1.1"},
+                )
+                assert ret2 and "ui" in ret2
+
+                png_candidates2 = list(Path(tmpdir).rglob("LukutarSmoke_00001.png"))
+                if not png_candidates2:
+                    png_candidates2 = list(output_dir.rglob("LukutarSmoke_00001.png"))
+                assert png_candidates2, "PNG collision file not found"
+
+                # JPG save + EXIF round-trip
+                jpg_ret = save_node.save(
+                    images=small_tensor,
+                    path=tmpdir,
+                    filename="LukutarSmokeJPG",
+                    format="JPG",
+                    quality=95,
+                    metadata={"desc": "smoke", "version": "1.1"},
+                )
+                assert jpg_ret and "ui" in jpg_ret
+
+                jpg_candidates = list(Path(tmpdir).rglob("LukutarSmokeJPG.jpg"))
+                if not jpg_candidates:
+                    jpg_candidates = list(output_dir.rglob("LukutarSmokeJPG.jpg"))
+                assert jpg_candidates, "JPG file not found"
+
+                with PILImage.open(jpg_candidates[0]) as img:
+                    exif = img.getexif()
+                    raw = exif.get(0x9286)
+                    assert raw is not None, "EXIF UserComment missing in JPG"
+                    data = raw[8:].decode("utf-16").rstrip("\x00")
+                    import json as _json
+
+                    loaded = _json.loads(data)
+                    assert loaded == {"desc": "smoke", "version": "1.1"}, (
+                        f"JPG EXIF round-trip mismatch: {loaded}"
+                    )
+        finally:
+            sys.path.remove(str(COMFYUI_ROOT))
+
+    # ------------------------------------------------------------------ #
+    # E2E: Chain MetadataBlocks → MergeMetadata                          #
+    # ------------------------------------------------------------------ #
+    blocks_node = mappings["MetadataBlocks"]()
+    (block_a,) = blocks_node.create_blocks(
+        num_blocks=3,
+        name_1="env", value_1="production",
+        name_2="model", value_2="sd-xl",
+        name_3="", value_3="ignored",
+    )
+    assert block_a == {"env": "production", "model": "sd-xl"}
+
+    (block_b,) = blocks_node.create_blocks(
+        num_blocks=2,
+        name_1="model", value_1="sdxl-v2",
+        name_2="revision", value_2="beta",
+    )
+    assert block_b == {"model": "sdxl-v2", "revision": "beta"}
+
+    merge_node = mappings["MergeMetadata"]()
+    (merged,) = merge_node.merge(meta_1=block_a, meta_2=block_b)
+    # Later-wins: model should be from block_b
+    assert merged == {
+        "env": "production",
+        "model": "sdxl-v2",
+        "revision": "beta",
+    }
 
     print("SMOKE TEST PASSED: nodes load and behave as expected")
 

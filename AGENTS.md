@@ -43,10 +43,23 @@ the native group menu, optionally recolors the group frame, and mirrors
 the states into the hidden `group_states` JSON widget that the backend
 republishes as the single GROUP_STATES output); and **Seed History** —
 a zero-input seed generator with the same ``seed`` +
-``control_after_generate`` parameters as the built-in Seed node, plus a
-``history_size`` parameter (default 5) that keeps a rolling log of past
-seeds rendered as copyable text below all other parameters via
-`web/js/seed_history.js`.
+	``control_after_generate`` parameters as the built-in Seed node, plus a
+	``history_size`` parameter (default 5) that keeps a rolling log of past
+	seeds rendered as copyable text below all other parameters via
+	`web/js/seed_history.js`; and the metadata/save additions — a new
+	``LUKUTAR_METADATA`` socket type (ordered ``dict[str, str]`` blocks)
+	served by **Save Image (Metadata)** (`nodes/save_image.py` +
+	`core/image_saver.py`, guarded PIL import — Pillow from ComfyUI runtime,
+	JXL only with optional `pillow-jxl-plugin`; relative paths resolve against
+	ComfyUI root; collision suffix `_00001`, … per format; per-format metadata
+	embedding: PNG tEXt chunks, JPG/WEBP/JXL EXIF UserComment
+	`UNICODE\0`+UTF-16 JSON, TIFF ImageDescription JSON, BMP none; BMP hides
+	the metadata input socket via `web/js/save_image.js`), the metadata trio in
+	`nodes/metadata.py`/`core/metadata.py` (Blocks: static 16 name/value pairs
+	+ `web/js/metadata_blocks.js` visibility control; Standard: hidden PROMPT +
+	EXTRA_PNGINFO inputs for workflow/prompt/datetime entries; Merge: empty
+	INPUT_TYPES with `meta_N` kwargs + `web/js/metadata_merge.js` growth
+	mirroring the bundle pair).
 The nodes' behavioral contract (inputs, batch semantics, auto-tune,
 progress reporting, markup grammar) is specified in `README.md`; keep
 the README in sync with any behavior change.
@@ -69,11 +82,13 @@ the README in sync with any behavior change.
   slot growth + invisible per-slot links; Group Switch
   dynamic group rows; "Paste (Clipspace, Keep Mask)" context-menu item
   that re-bakes the current file's alpha-mask onto a pasted clipspace
-  image, see README). Vanilla ES modules, no build step; the pack must
-  stay fully functional without them (for Set/Get that means wiring the
-  value input manually; for Set/Get Bundle, hand-wiring the
-  slot_1..slot_16 fallback bus; for Group Switch, setting the
-  `group_states` JSON by hand).
+  image, see README; `save_image.js` hides/shows the metadata socket on
+  format change; `metadata_blocks.js` collapses name/value pairs beyond
+  `num_blocks`; `metadata_merge.js` grows/collapses `meta_N` inputs).
+  Vanilla ES modules, no build step; the pack must stay fully functional
+  without them (for Set/Get that means wiring the value input manually;
+  for Set/Get Bundle, hand-wiring the slot_1..slot_16 fallback bus; for
+  Group Switch, setting the `group_states` JSON by hand).
 - `utils/` — torch IMAGE-tensor ⇄ numpy frame conversion helpers
   (B,H,W,3 float [0,1] RGB ⇄ HWC float32 [0,255] RGB).
 - `tests/unit/` — engine tests, torch-free. `tests/smoke_test_comfyui_load.py`
@@ -83,8 +98,9 @@ Adding a node: engine in `core/`, node class in `nodes/`, then register
 it in `nodes/__init__.py` (`NODE_CLASS_MAPPINGS` +
 `NODE_DISPLAY_NAME_MAPPINGS`). ComfyUI menu categories: `Lukutar/Image`
 for image nodes, `Lukutar/Prompt` for the prompt-annotation nodes,
-`Lukutar/Variables` for the variable pair, `Lukutar/Groups` for the
-Group Switch, `Lukutar/Seeds` for seed-related nodes.
+`Lukutar/Variables` for the variable pair, `Lukutar/Metadata` for the
+metadata trio, `Lukutar/Groups` for the Group Switch, `Lukutar/Seeds`
+for seed-related nodes.
 
 ## Commands
 
