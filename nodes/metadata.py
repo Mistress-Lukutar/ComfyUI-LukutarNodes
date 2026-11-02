@@ -45,7 +45,7 @@ class MetadataBlocksNode:
             "num_blocks": (
                 "INT",
                 {
-                    "default": 3,
+                    "default": 1,
                     "min": 1,
                     "max": MAX_METADATA_BLOCKS,
                     "tooltip": (

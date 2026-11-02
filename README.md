@@ -789,14 +789,14 @@ encoder control. Pass-through outputs (`images`, `metadata`) let you chain
 Builds a LUKUTAR_METADATA dict from up to 16 editable name/value pairs
 (`Lukutar/Metadata`). Names are single-line strings; values support
 multiline text. The `num_blocks` parameter controls how many pairs are
-actually processed (default 3, range 1–16). Pairs with an empty (after
+actually processed (default 1, range 1–16). Pairs with an empty (after
 trimming) name are skipped. Duplicate names resolve **later-wins**.
 
 #### Parameters
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| num_blocks | INT | 3 | How many name/value pairs to process (1–16). The web extension hides pairs beyond this count on the canvas. |
+| num_blocks | INT | 1 | How many name/value pairs to process (1–16). The web extension hides pairs beyond this count on the canvas. |
 
 #### Inputs
 

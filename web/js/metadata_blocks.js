@@ -40,7 +40,7 @@ function findWidget(node, name) {
  */
 function applyVisibility(node) {
   const numBlocksWidget = findWidget(node, NUM_BLOCKS_WIDGET);
-  const count = Math.min(16, Math.max(1, numBlocksWidget?.value ?? 3));
+  const count = Math.min(16, Math.max(1, numBlocksWidget?.value ?? 1));
 
   for (let i = 1; i <= MAX_BLOCKS; i++) {
     const nameW = findWidget(node, `name_${i}`);
@@ -67,6 +67,18 @@ function applyVisibility(node) {
       }
     }
   }
+}
+
+let syncTimer = null;
+/** Coalesce a burst of events into one pass on the next tick. */
+function scheduleSync() {
+  if (syncTimer != null) return;
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    (app.graph?._nodes ?? []).forEach((node) => {
+      if (node.type === NODE_NAME) applyVisibility(node);
+    });
+  }, 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -114,5 +126,13 @@ app.registerExtension({
       applyVisibility(this);
       return result;
     };
+  },
+
+  setup() {
+    scheduleSync();
+    // Newer frontends can change INT widget values without invoking
+    // widget.callback; the cheap periodic pass keeps the visible pair
+    // count in sync, same as group_switch.js.
+    setInterval(scheduleSync, 1000);
   },
 });
