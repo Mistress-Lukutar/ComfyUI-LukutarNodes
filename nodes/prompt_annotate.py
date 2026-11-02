@@ -13,7 +13,9 @@ from typing import Any
 
 from ..core.prompt_annotator import (
     EDIT_MODES,
+    STRING_MODES,
     AnnotatedPrompt,
+    annotation_string,
     edit_segment,
     labels_text,
     parse_annotated_prompt,
@@ -271,6 +273,63 @@ class AnnotationLabelsNode:
             _as_annotations(annotations), include_common=include_common
         )
         logger.debug("AnnotationLabels: %s", text or "(none)")
+        return (text,)
+
+
+class AnnotationsToStringNode:
+    '''Convert the annotations back to a plain prompt string.
+
+    Bridges ANNOTATIONS into any STRING input — e.g. after an
+    Annotation Segment Edit chain, or when only the annotations wire
+    reaches the branch. `mode` picks between the tag-free prompt
+    (what CLIP receives) and the original markup text.
+    '''
+
+    CATEGORY = "Lukutar/Prompt"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict[str, dict[str, tuple]]:
+        return {
+            "required": {
+                "annotations": (
+                    "ANNOTATIONS",
+                    {
+                        "tooltip": (
+                            "Annotations from Prompt Annotate (Lukutar)"
+                        )
+                    },
+                ),
+                "mode": (
+                    list(STRING_MODES),
+                    {
+                        "default": "clean",
+                        "tooltip": (
+                            "clean: the tag-free prompt as sent to "
+                            "CLIP; raw: the original prompt text with "
+                            "the |label: text| markup"
+                        ),
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text",)
+    FUNCTION = "convert"
+
+    def convert(self, annotations: Any, mode: str = "clean") -> tuple[str]:
+        '''Render the annotations as a plain prompt string.
+
+        Args:
+            annotations: ANNOTATIONS output of Prompt Annotate.
+            mode: ``clean`` for the tag-free prompt, ``raw`` for the
+                original markup text.
+
+        Returns:
+            One-element tuple with the prompt string.
+        '''
+        text = annotation_string(_as_annotations(annotations), mode)
+        logger.debug("AnnotationsToString [%s]: %s", mode, text)
         return (text,)
 
 

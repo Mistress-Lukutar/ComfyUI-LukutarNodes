@@ -24,6 +24,7 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
   (`Lukutar/Prompt`).
 - **Annotation Labels** — the label set as one comma-separated string
   (`Lukutar/Prompt`).
+- **Annotations to String** — annotations → plain prompt string, tag-free or raw markup (Lukutar/Prompt).
 - **Annotation Segment Edit** — pass-through per-label edits on
   ANNOTATIONS: prepend/append/remove text, new/delete segments
   (`Lukutar/Prompt`).
@@ -377,6 +378,32 @@ with no tagged regions and `include_common` off the output is empty.
 | Name | Type | Description |
 |------|------|-------------|
 | labels | STRING | Comma-separated label list, e.g. `body, face, hair`. |
+
+### Annotations to String
+
+Converts **ANNOTATIONS** back into a plain prompt string — bridges the
+annotations wire into any **STRING** input (e.g. after an Annotation
+Segment Edit chain, or when only the annotations socket reaches a
+branch). The `mode` combo picks between the tag-free output and the
+original markup text:
+
+- `clean` — the same text as Prompt Annotate's `clean_prompt` output
+  (what CLIP receives);
+- `raw` — the exact original text with the ``|label: text|`` markup
+  intact.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| annotations | ANNOTATIONS | — | Annotations from Prompt Annotate. |
+| mode | COMBO | clean | `clean`: the tag-free prompt as sent to CLIP; `raw`: the original text with the ``|label: text|`` markup. |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| text | STRING | The selected prompt string. |
 
 ### Annotation Segment Edit
 

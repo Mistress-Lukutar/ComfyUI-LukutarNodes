@@ -405,6 +405,34 @@ def labels_text(
     return LABEL_LIST_SEPARATOR.join(labels)
 
 
+#: Output modes of `annotation_string`: the tag-free prompt or the
+#: original text with the markup.
+STRING_MODES = ("clean", "raw")
+
+
+def annotation_string(annotated: AnnotatedPrompt, mode: str = "clean") -> str:
+    '''Return the annotation's prompt as a plain string.
+
+    Args:
+        annotated: Parsed prompt from `parse_annotated_prompt`.
+        mode: ``clean`` returns the tag-free prompt ready for CLIP;
+            ``raw`` returns the original prompt text with the
+            ``|label: text|`` markup exactly as typed.
+
+    Returns:
+        The selected prompt string.
+
+    Raises:
+        ValueError: If `mode` is not one of `STRING_MODES`.
+    '''
+    if mode not in STRING_MODES:
+        raise ValueError(
+            f"Unknown mode {mode!r}; expected one of: "
+            f"{LABEL_LIST_SEPARATOR.join(STRING_MODES)}"
+        )
+    return annotated.clean if mode == "clean" else annotated.raw
+
+
 def _structure_tokens(annotated: AnnotatedPrompt) -> list[_Plain | _Tag]:
     '''Recover the plain/tag token sequence of a parsed annotation.
 

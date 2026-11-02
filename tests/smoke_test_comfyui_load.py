@@ -609,6 +609,7 @@ def main() -> None:
     assert "AnnotationSegment" in mappings
     assert "AnnotationLabels" in mappings
     assert "AnnotationSegmentEdit" in mappings
+    assert "AnnotationsToString" in mappings
     assert "PromptAnnotate" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
 
     annotate_node = mappings["PromptAnnotate"]()
@@ -646,6 +647,19 @@ def main() -> None:
         annotations, include_common=True
     )
     assert labels_all == "all, body, face, hair, background"
+
+    # AnnotationsToString — clean and raw modes.
+    (clean_str,) = mappings["AnnotationsToString"]().convert(annotations)
+    assert clean_str == (
+        "masterpiece, 1girl, thin, blue eyes, smirk, red hair, stands, "
+        "outdoors, park"
+    ), f"unexpected clean string: {clean_str!r}"
+    (raw_str,) = mappings["AnnotationsToString"]().convert(
+        annotations, "raw"
+    )
+    assert raw_str.startswith("masterpiece, |body:"), (
+        f"unexpected raw string: {raw_str!r}"
+    )
 
     # Pass-through edit: append to a label, then strip it back out.
     edit_node = mappings["AnnotationSegmentEdit"]()

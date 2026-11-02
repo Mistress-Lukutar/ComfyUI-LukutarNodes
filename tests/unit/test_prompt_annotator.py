@@ -13,12 +13,16 @@ from comfyui_lukutar_nodes.core.prompt_annotator import (
     DEFAULT_LABEL,
     AnnotatedPrompt,
     PromptAnnotateError,
+    annotation_string,
     edit_segment,
     labels_text,
     parse_annotated_prompt,
     segment_text,
     to_impact_wildcard,
     to_markup,
+)
+from comfyui_lukutar_nodes.nodes.prompt_annotate import (
+    AnnotationsToStringNode,
 )
 
 _EXAMPLE = (
@@ -344,3 +348,73 @@ def test_edit_segment_label_list_validation() -> None:
 def test_raw_is_preserved() -> None:
     annotated: AnnotatedPrompt = parse_annotated_prompt(_EXAMPLE)
     assert annotated.raw == _EXAMPLE
+
+
+# ------------------------------------------------------------------ #
+# annotation_string (core/prompt_annotator.py)                        #
+# ------------------------------------------------------------------ #
+
+
+def test_annotation_string_clean_mode() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    assert annotation_string(annotated, "clean") == annotated.clean
+
+
+def test_annotation_string_raw_mode() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    assert annotation_string(annotated, "raw") == annotated.raw
+
+
+def test_annotation_string_default_is_clean() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    # No mode argument — should default to "clean"
+    assert annotation_string(annotated) == annotated.clean
+
+
+def test_annotation_string_empty_prompt_clean() -> None:
+    annotated = parse_annotated_prompt("")
+    assert annotation_string(annotated, "clean") == ""
+
+
+def test_annotation_string_empty_prompt_raw() -> None:
+    annotated = parse_annotated_prompt("")
+    assert annotation_string(annotated, "raw") == ""
+
+
+def test_annotation_string_unknown_mode_raises() -> None:
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    with pytest.raises(ValueError, match="Unknown mode"):
+        annotation_string(annotated, "bogus")
+
+
+# ------------------------------------------------------------------ #
+# AnnotationsToStringNode (nodes/prompt_annotate.py)                  #
+# ------------------------------------------------------------------ #
+
+
+def test_annotations_to_string_node_clean() -> None:
+    node = AnnotationsToStringNode()
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    (result,) = node.convert(annotated, "clean")
+    assert result == _EXAMPLE_CLEAN
+
+
+def test_annotations_to_string_node_raw() -> None:
+    node = AnnotationsToStringNode()
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    (result,) = node.convert(annotated, "raw")
+    assert result == _EXAMPLE
+
+
+def test_annotations_to_string_node_default_mode() -> None:
+    node = AnnotationsToStringNode()
+    annotated = parse_annotated_prompt(_EXAMPLE)
+    # Default mode is "clean"
+    (result,) = node.convert(annotated)
+    assert result == _EXAMPLE_CLEAN
+
+
+def test_annotations_to_string_node_non_annotations_raises() -> None:
+    node = AnnotationsToStringNode()
+    with pytest.raises(ValueError, match="Expected an ANNOTATIONS output"):
+        node.convert("not annotations")

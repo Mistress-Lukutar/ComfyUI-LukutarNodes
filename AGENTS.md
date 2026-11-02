@@ -13,7 +13,8 @@ annotation set — **Prompt Annotate** (inline `|label: text|` markup in
 one prompt, outputs ANNOTATIONS + clean STRING), **Annotations to
 Wildcard (LAB)** (converts ANNOTATIONS to Impact Pack `[LAB]`
 wildcard text), **Annotation Segment** (extracts one label's text),
-**Annotation Labels** (labels as one comma-separated string) and
+**Annotation Labels** (labels as one comma-separated string),
+**Annotations to String** (prompt string from annotations, clean or raw markup) and
 **Annotation Segment Edit** (pass-through ANNOTATIONS → ANNOTATIONS
 editor: prepend/append/remove per label, new/delete segments;
 comma-separated multi-label input); and the workflow-variable pair
