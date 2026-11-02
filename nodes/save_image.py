@@ -47,6 +47,10 @@ def build_ui_entries(saved: list[Path]) -> list[dict[str, str]]:
     Each entry maps a saved file to its subfolder and output type so
     that ComfyUI can display it in the history / output viewer.
 
+    Files under the output directory emit ``type: "output"``; files
+    under the temp directory emit ``type: "temp"``.  Arbitrary paths
+    outside both directories are silently skipped.
+
     Args:
         saved: List of destination :class:`Path` objects returned by
             a saver function.
@@ -55,16 +59,22 @@ def build_ui_entries(saved: list[Path]) -> list[dict[str, str]]:
         List of dicts with keys ``filename``, ``subfolder``, ``type``.
     '''
     entries: list[dict[str, str]] = []
-    if HAS_COMFY:
-        output_dir = folder_paths.get_output_directory()
-        for p in saved:
-            try:
-                resolved = p.resolve()
-                out_resolved = Path(output_dir).resolve()
-                if resolved.is_relative_to(out_resolved):
-                    rel_parent = resolved.parent.relative_to(
-                        out_resolved
-                    )
+    if not HAS_COMFY:
+        return entries
+
+    # Build candidate bases once; order matters for degenerate configs.
+    candidates: list[tuple[str, Path]] = [
+        ("output", Path(folder_paths.get_output_directory())),
+        ("temp", Path(folder_paths.get_temp_directory())),
+    ]
+
+    for p in saved:
+        try:
+            resolved = p.resolve()
+            for type_name, base_dir in candidates:
+                base_resolved = base_dir.resolve()
+                if resolved.is_relative_to(base_resolved):
+                    rel_parent = resolved.parent.relative_to(base_resolved)
                     subfolder = rel_parent.as_posix()
                     if subfolder == ".":
                         subfolder = ""
@@ -72,11 +82,13 @@ def build_ui_entries(saved: list[Path]) -> list[dict[str, str]]:
                         {
                             "filename": p.name,
                             "subfolder": subfolder,
-                            "type": "output",
+                            "type": type_name,
                         }
                     )
-            except (ValueError, OSError):
-                pass
+                    break  # first matching base wins
+        except (ValueError, OSError):
+            pass
+
     return entries
 
 
