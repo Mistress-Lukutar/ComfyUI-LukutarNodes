@@ -115,6 +115,12 @@ app.registerExtension({
 
       // Initial pass — show the default number of blocks.
       applyVisibility(this);
+
+      // The node is constructed at full height (all 16 pairs declared);
+      // snap the initial height down to what the visible widgets need.
+      const fitted = this.computeSize(this.size[0]);
+      if (fitted[1] < this.size[1]) this.size[1] = fitted[1];
+
       return result;
     };
 
