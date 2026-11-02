@@ -23,7 +23,6 @@ from ..core.a1111_parameters import (
     a1111_float_str,
     build_parameters,
     get_model_hash_cache,
-    quote_a1111,
 )
 from ..core.metadata import (
     METADATA_TYPE,
@@ -442,10 +441,10 @@ class A1111ModelInfoNode:
             }
         elif model_type == "LoRA":
             name = os.path.splitext(model_name)[0]
-            meta = {"Lora hashes": quote_a1111(f"{name}: {h}")}
+            meta = {"Lora hashes": f"{name}: {h}"}
         elif model_type == "Embedding":
             name = os.path.splitext(model_name)[0]
-            meta = {"TI hashes": quote_a1111(f"{name}: {h}")}
+            meta = {"TI hashes": f"{name}: {h}"}
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
@@ -456,7 +455,8 @@ class A1111LoraHashesNode:
     '''Compute and emit LoRA hashes as a metadata block.
 
     Up to 8 LoRA slots are accepted; unused slots default to ``"None"``.
-    The resulting ``Lora hashes`` entry is quoted per A1111 conventions.
+    The value is stored raw; A1111 quoting (``quote_a1111``) is applied once
+    at serialization time by the A1111 Parameters node.
     '''
 
     CATEGORY = "Lukutar/Metadata"
@@ -505,7 +505,7 @@ class A1111LoraHashesNode:
             **kwargs: The ``lora_N`` inputs from ComfyUI.
 
         Returns:
-            Tuple of (metadata dict, quoted hash string).
+            Tuple of (metadata dict, joined hash string).
 
         Raises:
             RuntimeError: When a non-empty slot is used outside the runtime.
@@ -542,5 +542,4 @@ class A1111LoraHashesNode:
             hashes.append(f"{stem}: {h}")
 
         joined = ", ".join(hashes)
-        quoted = quote_a1111(joined)
-        return ({"Lora hashes": quoted}, quoted)
+        return ({"Lora hashes": joined}, joined)

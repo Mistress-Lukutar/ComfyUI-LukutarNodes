@@ -11,7 +11,6 @@ directly and calling their ``build`` methods.
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -282,12 +281,9 @@ def test_lora_hashes_with_real_slots(tmp_path: Path) -> None:
     expected_joined = (
         f"lora_1: {expected_hash_1}, lora_3: {expected_hash_3}"
     )
-    # The value should be the quoted joined string.
-    import json as _json
-
-    assert meta["Lora hashes"] == _json.dumps(expected_joined, ensure_ascii=False)
-    # The second return value is also the quoted string per spec.
-    assert hashes_str == _json.dumps(expected_joined, ensure_ascii=False)
+    # The value is stored raw; quoting happens at serialization time.
+    assert meta["Lora hashes"] == expected_joined
+    assert hashes_str == expected_joined
 
 
 def test_lora_hashes_numeric_order(tmp_path: Path) -> None:
@@ -332,9 +328,7 @@ def test_lora_hashes_numeric_order(tmp_path: Path) -> None:
     expected_joined = (
         f"lora_1: {hash_1}, lora_10: {hash_10}"
     )
-    assert meta["Lora hashes"] == json.dumps(expected_joined, ensure_ascii=False)
-    # The second return value is also the quoted string per spec.
-    # Note: expected_joined does not contain comma+colon so it's unquoted here too
+    assert meta["Lora hashes"] == expected_joined
 
 # ======================================================================
 # A1111ModelInfoNode                                                     #
@@ -485,3 +479,17 @@ def test_lora_hashes_no_raise_when_all_none_folder_paths_none() -> None:
         meta, hashes = node.build(**kwargs)
         assert meta == {}
         assert hashes == ""
+
+
+def test_parameters_node_quotes_lora_hashes_once() -> None:
+    """A raw metadata dict with Lora hashes must be quoted exactly once."""
+    node = A1111ParametersNode()
+    meta, text = node.build(
+        positive="p",
+        negative="",
+        version="",
+        meta_1={"Lora hashes": "vhf: 47a7a957d7"},
+    )
+    # quote_a1111 detects the colon and JSON-encodes to '"vhf: 47a7a957d7"'.
+    assert 'Lora hashes: "vhf: 47a7a957d7"' in text
+    assert '\\"' not in text

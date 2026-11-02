@@ -1087,9 +1087,10 @@ LoRA, and Embedding.
 
 Computes SHA-256 prefixes for up to eight LoRA files and emits a single
 `"Lora hashes"` metadata entry in A1111 format
-(`Lukutar/Metadata`). The `"Lora hashes"` value is a comma-separated
-list of `"name: hash"` pairs, JSON-encoded (quoted) because it contains
-colons and commas — byte-compatible with A1111's own parser.
+(`Lukutar/Metadata`). The `"Lora hashes"` value is a raw, comma-separated
+list of `"name: hash"` pairs; quoting (JSON-encoding) is applied only when
+the **A1111 Parameters** node composes the infotext via `quote_a1111` —
+byte-compatible with A1111's own parser.
 
 #### Parameters
 
@@ -1101,8 +1102,8 @@ colons and commas — byte-compatible with A1111's own parser.
 
 | Name | Type | Description |
 |------|------|-------------|
-| metadata | LUKUTAR_METADATA | Single-entry dict `{"Lora hashes": "name: hash, name: hash"}` (quoted via `quote_a1111`). Empty dict when all slots are `"None"` or unconnected. |
-| lora_hashes | STRING | The same quoted text as the metadata value, for inspection or manual editing. |
+| metadata | LUKUTAR_METADATA | Single-entry dict `{"Lora hashes": "name: hash, name: hash"}` (raw; A1111 quoting is applied once when the **A1111 Parameters** node composes the infotext). Empty dict when all slots are `"None"` or unconnected. |
+| lora_hashes | STRING | The raw comma-joined `"name: hash"` string (not pre-quoted), for inspection or manual editing. |
 
 #### Behaviour
 
@@ -1113,8 +1114,9 @@ colons and commas — byte-compatible with A1111's own parser.
 - **Why not multiple Model Info nodes?** Each A1111 Model Info emits a
   `"Lora hashes"` key, and **Merge Metadata** resolves duplicate keys
   by later-wins — so wiring two Model Info nodes would clobber the first
-  node's entry. This node aggregates all hashes into one quoted value in
-  a single metadata block, avoiding that conflict entirely.
+  node's entry. This node aggregates all hashes into a single raw value
+  in a single metadata block (A1111 quoting is applied once by the
+  **A1111 Parameters** node), avoiding that conflict entirely.
 - **Runtime requirement.** The node raises a `RuntimeError` when called
   outside the ComfyUI runtime and at least one non-"None" slot is active.
 - **Web extension.** The frontend (`web/js/a1111_lora_hashes.js`) hides
