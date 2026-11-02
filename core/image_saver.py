@@ -3,7 +3,7 @@ File:   image_saver.py
 Brief:  Pure engine for saving numpy frames to disk in various image formats.
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.2.0
+Version: v0.3.0
 '''
 
 from __future__ import annotations
@@ -52,6 +52,9 @@ METADATALESS_FORMATS: tuple[str, ...] = ("BMP",)
 
 #: Default JPEG/WEBP quality when not specified by the user.
 DEFAULT_QUALITY: int = 95
+
+#: Pack format names that differ from the Pillow save-format registry.
+_PIL_FORMAT_NAMES: dict[str, str] = {"JPG": "JPEG"}
 
 #: Socket type consumed from the metadata inputs (mirrors core.metadata.METADATA_TYPE).
 METADATA_TYPE: str = "LUKUTAR_METADATA"
@@ -271,6 +274,22 @@ def build_exif_payload(metadata: Mapping[str, str]) -> bytes:
     return exif.tobytes()
 
 
+def _exif_kwargs(exif: bytes | None) -> dict[str, bytes]:
+    '''Build save-kwargs carrying *exif* only when it was actually built.
+
+    Passing an explicit ``exif=None`` crashes Pillow's JPEG encoder
+    (``len(None)``) and its WEBP encoder (``startswith(None)``), so the
+    kwarg must be absent rather than ``None`` when there is no payload.
+
+    Args:
+        exif: Raw EXIF bytes, or ``None`` when metadata was absent.
+
+    Returns:
+        ``{"exif": exif}`` or an empty dict.
+    '''
+    return {"exif": exif} if exif is not None else {}
+
+
 # ---------------------------------------------------------------------------
 # Frame savers
 # ---------------------------------------------------------------------------
@@ -312,10 +331,10 @@ def save_frame(
             img.save(dst, format="PNG", pnginfo=pnginfo)
         elif fmt == "JPG":
             exif = build_exif_payload(metadata) if metadata else None
-            img.save(dst, format="JPEG", quality=quality, exif=exif)
+            img.save(dst, format="JPEG", quality=quality, **_exif_kwargs(exif))
         elif fmt == "WEBP":
             exif = build_exif_payload(metadata) if metadata else None
-            img.save(dst, format="WEBP", quality=quality, exif=exif)
+            img.save(dst, format="WEBP", quality=quality, **_exif_kwargs(exif))
         elif fmt == "TIFF":
             tiffinfo = None
             if metadata:
@@ -336,7 +355,7 @@ def save_frame(
                 dst, fmt,
             )
             try:
-                img.save(dst, format=fmt)
+                img.save(dst, format=_PIL_FORMAT_NAMES.get(fmt, fmt))
             except Exception:
                 raise RuntimeError(
                     f"Failed to save {dst} ({fmt})"
@@ -398,7 +417,7 @@ def save_frame_jxl(
             use_original_profile=settings.use_original_profile,
             num_threads=settings.num_threads,
             compress_metadata=settings.compress_metadata,
-            exif=exif,
+            **_exif_kwargs(exif),
         )
     except Exception as orig_exc:
         if metadata is not None:

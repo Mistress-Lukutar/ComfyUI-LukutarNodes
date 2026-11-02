@@ -3,7 +3,7 @@ File:   test_image_saver.py
 Brief:  Unit tests for the pure image-saving engine (torch-free).
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.1.0
+Version: v0.2.0
 
 Tests core.image_saver functions: sanitize_filename, normalize_dir,
 unique_destination, available_formats, supports_metadata, save_frame,
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -585,6 +586,181 @@ def test_save_frame_float32_to_uint8_round_clip(
         assert arr[0, 0, 0] == expected[0, 0, 0]
         assert arr[0, 0, 1] == expected[0, 0, 1]
         assert arr[0, 0, 2] == expected[0, 0, 2]
+
+
+# ======================================================================
+# Bug-regression: save_frame with None / empty metadata + degrade retry
+# ======================================================================
+
+
+def test_save_jpg_no_metadata_succeeds(
+    tmp_path: Path, sample_frame: np.ndarray
+) -> None:
+    """JPG with metadata=None must not raise; file opens as JPEG.
+
+    Bug: ``save_frame`` passes ``exif=None`` to Pillow which raises
+    ``TypeError: object of type 'NoneType' has no len()``.
+    """
+    if not HAS_PIL:
+        pytest.skip("Pillow not installed")
+
+    dst = tmp_path / "test_no_meta.jpg"
+    save_frame(sample_frame, dst, "JPG", quality=95, metadata=None)
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(dst) as img:
+        assert img.format == "JPEG"
+
+
+def test_save_jpg_empty_metadata_succeeds(
+    tmp_path: Path, sample_frame: np.ndarray
+) -> None:
+    """JPG with metadata={} (empty dict is falsy → no exif) must succeed.
+
+    Bug: same as above — empty dict evaluates falsy but ``exif=None`` is
+    still passed to Pillow's JPEG encoder.
+    """
+    if not HAS_PIL:
+        pytest.skip("Pillow not installed")
+
+    dst = tmp_path / "test_empty_meta.jpg"
+    save_frame(sample_frame, dst, "JPG", quality=95, metadata={})
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(dst) as img:
+        assert img.format == "JPEG"
+
+
+def test_save_webp_no_metadata_succeeds(
+    tmp_path: Path, sample_frame: np.ndarray
+) -> None:
+    """WEBP with metadata=None must not raise; file opens as WEBP.
+
+    Bug: ``exif=None`` causes
+    ``AttributeError: 'NoneType' object has no attribute 'startswith'``.
+    """
+    if not HAS_PIL:
+        pytest.skip("Pillow not installed")
+
+    dst = tmp_path / "test_webp_no_meta.webp"
+    save_frame(sample_frame, dst, "WEBP", quality=95, metadata=None)
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(dst) as img:
+        assert img.format == "WEBP"
+
+
+def test_save_webp_empty_metadata_succeeds(
+    tmp_path: Path, sample_frame: np.ndarray
+) -> None:
+    """WEBP with metadata={} must succeed (empty dict → no exif).
+
+    Bug: same as WEBP-no-metadata — ``exif=None`` passed to Pillow.
+    """
+    if not HAS_PIL:
+        pytest.skip("Pillow not installed")
+
+    dst = tmp_path / "test_webp_empty_meta.webp"
+    save_frame(sample_frame, dst, "WEBP", quality=95, metadata={})
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(dst) as img:
+        assert img.format == "WEBP"
+
+
+def test_save_jpg_oversized_metadata_degrades(
+    tmp_path: Path,
+    sample_frame: np.ndarray,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Oversized EXIF payload on JPG triggers degrade → metadata-less save.
+
+    Bug: the retry path calls ``img.save(dst, format=fmt)`` with fmt="JPG"
+    but Pillow only registers "JPEG" → ``KeyError: 'JPG'``.
+
+    The large metadata dict produces a ~80 KB UTF-16 payload that exceeds
+    Pillow's 65 533-byte EXIF limit, so the first save raises
+    ``ValueError: EXIF data is too long``, the degrade path fires, and
+    then dies on the bad format string.
+    """
+    if not HAS_PIL:
+        pytest.skip("Pillow not installed")
+
+    dst = tmp_path / "test_big_meta.jpg"
+    meta = {"workflow": "x" * 40_000}
+
+    caplog.set_level(logging.WARNING)
+
+    save_frame(sample_frame, dst, "JPG", quality=95, metadata=meta)
+
+    assert dst.exists()
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(dst) as img:
+        assert img.format == "JPEG"
+        # Must have been saved without metadata after the retry.
+        assert img.getexif().get(0x9286) is None
+
+    assert caplog.record_tuples, (
+        "Expected a warning about retrying without metadata"
+    )
+    retry_msgs = [
+        r.message for r in caplog.records if "retrying without metadata" in r.message
+    ]
+    assert retry_msgs
+
+
+def test_save_webp_large_metadata_roundtrip(
+    tmp_path: Path, sample_frame: np.ndarray
+) -> None:
+    """WEBP stores the same large payload and round-trips successfully.
+
+    WEBP has no 64 KB EXIF cap in Pillow so this test should PASS both
+    before and after the fix — it pins the WEBP/JPG asymmetry.
+    """
+    if not HAS_PIL:
+        pytest.skip("Pillow not installed")
+
+    dst = tmp_path / "test_webp_big.webp"
+    meta = {"workflow": "x" * 40_000}
+
+    save_frame(sample_frame, dst, "WEBP", quality=95, metadata=meta)
+
+    assert dst.exists()
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(dst) as img:
+        exif = img.getexif()
+        raw = exif.get(0x9286)
+        assert raw is not None, "EXIF UserComment missing in WEBP"
+        data = raw[8:].decode("utf-16").rstrip("\x00")
+        loaded = json.loads(data)
+        assert loaded == meta
+
+
+def test_save_frame_jxl_no_metadata_succeeds(
+    tmp_path: Path, sample_frame: np.ndarray, jxl_plugin_available: bool
+) -> None:
+    """metadata-less JXL save keeps working after the fix.
+
+    Pins the contract that ``save_frame_jxl(..., metadata=None)`` produces
+    a valid file without raising.
+    """
+    from PIL import Image as PILImage
+
+    dst = tmp_path / "test_jxl_no_meta.jxl"
+    save_frame_jxl(sample_frame, dst, JxlSettings(), metadata=None)
+
+    assert dst.exists()
+
+    with PILImage.open(dst) as img:
+        assert img.format == "JXL"
 
 
 # ======================================================================
