@@ -675,7 +675,7 @@ nodes and consumed by this save node.
 |------|------|---------|-------------|
 | images | IMAGE | — | Batch of frames to save. |
 | path | STRING | "output" | Target directory. Relative paths resolve against the ComfyUI root (`folder_paths.base_path`); absolute paths are used as-is. Missing directories are created automatically. |
-| filename | STRING | "Lukutar" | Base file name (extension added automatically). Forbidden characters for Windows filenames are replaced with underscores. |
+| filename | STRING | "img" | Base file name (extension added automatically). Forbidden characters for Windows filenames are replaced with underscores. |
 | format | COMBO | PNG | Output format: `PNG`, `JPG`, `WEBP`, `TIFF`, `BMP`. |
 | quality | INT | 95 | Compression quality, 1–100. Used by `JPG` and `WEBP`; ignored by `PNG`, `TIFF`, `BMP`. For JPEG-XL use the dedicated **Save Image JXL** node (see below). |
 
@@ -735,7 +735,7 @@ encoder control. Pass-through outputs (`images`, `metadata`) let you chain
 |------|------|---------|-------------|
 | images | IMAGE | — | Batch of frames to save. |
 | path | STRING | "output" | Target directory. Relative paths resolve against the ComfyUI root (`folder_paths.base_path`); absolute paths are used as-is. Missing directories are created automatically. |
-| filename | STRING | "Lukutar" | Base file name (extension added automatically). Forbidden characters for Windows filenames are replaced with underscores. |
+| filename | STRING | "img" | Base file name (extension added automatically). Forbidden characters for Windows filenames are replaced with underscores. |
 | lossless | BOOLEAN | off | Lossless (mathematically exact) encoding. When on, output pixels are identical to the input and `quality` is ignored. |
 | quality | INT | 90 | JPEG-style lossy quality, 0–100. `100` ≈ visually lossless. Ignored in lossless mode. |
 | effort | INT | 7 | Encoder effort, 1–9. Higher values compress better but run slower. |

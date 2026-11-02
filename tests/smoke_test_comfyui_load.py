@@ -3,7 +3,7 @@ File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
 Date:   2026-08-28
-Version: v0.7.2
+Version: v0.7.3
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -788,6 +788,10 @@ def main() -> None:
             import tempfile
 
             save_node = mappings["LukutarSaveImage"]()
+            fn_cfg = save_node.INPUT_TYPES()["required"]["filename"][1]
+            assert fn_cfg["default"] == "img", (
+                "filename default must be 'img'"
+            )
             small_tensor = torch.rand(1, 8, 8, 3)  # B,H,W,3 float [0,1]
 
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -912,6 +916,50 @@ def main() -> None:
                     assert loaded == {"desc": "smoke", "version": "1.1"}, (
                         f"JPG EXIF round-trip mismatch: {loaded}"
                     )
+
+                # Fourth save — JPG *without* metadata → must not crash, no EXIF.
+                jpg_no_meta_ret = save_node.save(
+                    images=small_tensor,
+                    path=tmpdir,
+                    filename="LukutarSmokeJPGNoMeta",
+                    format="JPG",
+                    quality=95,
+                )
+                assert jpg_no_meta_ret and "ui" in jpg_no_meta_ret
+                jpg_no_meta_result = jpg_no_meta_ret.get("result")
+                assert isinstance(jpg_no_meta_result, tuple) and len(
+                    jpg_no_meta_result
+                ) == 2, f"expected 2-tuple result, got {jpg_no_meta_result!r}"
+                assert jpg_no_meta_result[0] is small_tensor, (
+                    "JPG save() without metadata must return input tensor by identity"
+                )
+                assert jpg_no_meta_result[1] is None, (
+                    f"result[1] must be None when no metadata passed, "
+                    f"got {jpg_no_meta_result[1]!r}"
+                )
+
+                jpg_no_meta_candidates = list(
+                    Path(tmpdir).rglob("LukutarSmokeJPGNoMeta.jpg")
+                )
+                if not jpg_no_meta_candidates:
+                    import folder_paths as comfy_fp2
+
+                    base2 = getattr(comfy_fp2, "base_path", Path.cwd())
+                    jpg_no_meta_candidates = list(
+                        (Path(base2) / "output").rglob(
+                            "LukutarSmokeJPGNoMeta.jpg"
+                        )
+                    )
+                assert jpg_no_meta_candidates, (
+                    "JPG file without metadata not found"
+                )
+
+                with PILImage.open(jpg_no_meta_candidates[0]) as img:
+                    assert img.format == "JPEG", f"unexpected format: {img.format}"
+                    exif = img.getexif()
+                    assert exif.get(0x9286) is None, (
+                        "EXIF UserComment must be absent when no metadata passed"
+                    )
         finally:
             sys.path.remove(str(COMFYUI_ROOT))
 
@@ -952,6 +1000,10 @@ def main() -> None:
             from PIL import Image as PILImage  # noqa: F401
 
             jxl_node = mappings["LukutarSaveImageJxl"]()
+            jxl_fn_cfg = jxl_node.INPUT_TYPES()["required"]["filename"][1]
+            assert jxl_fn_cfg["default"] == "img", (
+                "filename default must be 'img'"
+            )
 
             small_tensor = torch.rand(1, 8, 8, 3)  # B,H,W,3 float [0,1]
 

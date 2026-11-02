@@ -3,7 +3,7 @@ File:   save_image.py
 Brief:  ComfyUI node for saving IMAGE batches to disk in various formats.
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.3.0
+Version: v0.3.1
 '''
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ class SaveImageNode:
                 "filename": (
                     "STRING",
                     {
-                        "default": "Lukutar",
+                        "default": "img",
                         "tooltip": "Base file name without extension.",
                     },
                 ),

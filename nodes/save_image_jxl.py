@@ -3,7 +3,7 @@ File:   save_image_jxl.py
 Brief:  ComfyUI node for saving IMAGE batches as JPEG-XL with full encoder control.
 Author: Mistress-Lukutar
 Date:   2026-11-02
-Version: v0.2.0
+Version: v0.2.1
 '''
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class SaveImageJxlNode:
                 "filename": (
                     "STRING",
                     {
-                        "default": "Lukutar",
+                        "default": "img",
                         "tooltip": "Base file name without extension.",
                     },
                 ),
