@@ -38,18 +38,35 @@ except ImportError:  # pragma: no cover - exercised only outside runtime
 
 try:
     import comfy.model_management as comfy_model_management  # runtime only
+    import comfy.sample as comfy_sample
+    import comfy.samplers as comfy_samplers
     import comfy.sd as comfy_sd
     import comfy.utils as comfy_utils
+    import latent_preview  # top-level module in the ComfyUI runtime
 except ImportError:  # pragma: no cover - exercised only outside runtime
     comfy_model_management = None  # type: ignore[assignment]
+    comfy_sample = None  # type: ignore[assignment]
+    comfy_samplers = None  # type: ignore[assignment]
     comfy_sd = None  # type: ignore[assignment]
     comfy_utils = None  # type: ignore[assignment]
+    latent_preview = None  # type: ignore[assignment]
+
+try:
+    import numpy as np  # ComfyUI runtime ships numpy
+except ImportError:  # pragma: no cover - exercised only outside runtime
+    np = None  # type: ignore[assignment]
+
+try:
+    from PIL import Image  # Pillow from the ComfyUI runtime
+except ImportError:  # pragma: no cover - exercised only outside runtime
+    Image = None  # type: ignore[assignment]
 
 from ..core.a1111_parameters import get_model_hash_cache
 from ..core.t2i_info import (
     INFO_TYPE,
     build_loader_info,
     format_lora_entries,
+    with_sampling,
 )
 from ..core.t2i_prompt import (
     DEFAULT_W_MAX,
@@ -970,6 +987,214 @@ class T2ILoaderNode:
         return (bundle, info)
 
 
+class T2ISamplerNode:
+    '''Sample the T2I bundle and emit the decoded preview.
+
+    Works like the core KSampler on the bundle's model/conditionings/
+    latent: the latent progress preview is shown by ComfyUI itself
+    (respecting the server preview settings).  When ``vae_decode`` is
+    enabled the finished samples are decoded to IMAGE, stored back into
+    the bundle's ``img`` slot and rendered as temp previews — the
+    standard output-node mechanism swaps the noise preview for the
+    final image.
+
+    The node is an ``OUTPUT_NODE`` (like PreviewImage), so it always
+    re-executes and displays its previews even without connected
+    outputs.
+    '''
+
+    CATEGORY = "Lukutar/T2I"
+    OUTPUT_NODE = True
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
+        sampler_choices = (
+            tuple(comfy_samplers.KSampler.SAMPLERS) if comfy_samplers else ()
+        )
+        scheduler_choices = (
+            tuple(comfy_samplers.KSampler.SCHEDULERS)
+            if comfy_samplers
+            else ()
+        )
+        return {
+            "required": {
+                "bundle": (
+                    BUNDLE_TYPE,
+                    {"tooltip": "Bundle from the T2I Loader."},
+                ),
+                "info": (
+                    INFO_TYPE,
+                    {"tooltip": "Info entity from the T2I Loader."},
+                ),
+                "seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 0xFFFFFFFFFFFFFFFF,
+                        "control_after_generate": True,
+                        "tooltip": "The seed used for creating the noise.",
+                    },
+                ),
+                "steps": (
+                    "INT",
+                    {
+                        "default": 20,
+                        "min": 1,
+                        "max": 10000,
+                        "tooltip": "Number of denoising steps.",
+                    },
+                ),
+                "cfg": (
+                    "FLOAT",
+                    {
+                        "default": 7.0,
+                        "min": 0.0,
+                        "max": 100.0,
+                        "step": 0.1,
+                        "round": 0.01,
+                        "tooltip": "Classifier-free guidance scale.",
+                    },
+                ),
+                "sampler_name": (
+                    sampler_choices,
+                    {"tooltip": "Sampling algorithm."},
+                ),
+                "scheduler": (
+                    scheduler_choices,
+                    {"tooltip": "Noise schedule."},
+                ),
+                "denoise": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": "Denoise strength (1.0 = txt2img).",
+                    },
+                ),
+                "vae_decode": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Decode the result to IMAGE for the "
+                        "preview and the bundle's img slot.",
+                    },
+                ),
+            }
+        }
+
+    RETURN_TYPES = (BUNDLE_TYPE, INFO_TYPE)
+    RETURN_NAMES = ("bundle", "info")
+    FUNCTION = "sample"
+    DESCRIPTION = (
+        "Samples the bundle's latent and re-emits the bundle with the "
+        "sampled latent (and decoded image); appends the sampling "
+        "parameters to the info entity."
+    )
+
+    def sample(
+        self,
+        bundle: Any,
+        info: Any,
+        seed: int,
+        steps: int,
+        cfg: float,
+        sampler_name: str,
+        scheduler: str,
+        denoise: float,
+        vae_decode: bool,
+    ) -> dict[str, Any]:
+        '''Run the sampler and update bundle and info.
+
+        Args:
+            bundle: Bundle from the loader.
+            info: Info mapping from the loader.
+            seed: Noise seed.
+            steps: Denoising step count.
+            cfg: CFG scale.
+            sampler_name: ComfyUI sampler name.
+            scheduler: ComfyUI scheduler name.
+            denoise: Denoise strength.
+            vae_decode: Whether to decode the result to IMAGE.
+
+        Returns:
+            The OUTPUT_NODE result dict with optional preview ui and
+            ``(bundle, info)`` outputs.
+
+        Raises:
+            RuntimeError: On a malformed bundle or when called outside
+                the ComfyUI runtime.
+        '''
+        if folder_paths is None or torch is None or latent_preview is None:
+            raise RuntimeError("T2I Sampler requires the ComfyUI runtime.")
+        validate_bundle(bundle)
+
+        model = bundle["model"]
+        latent = bundle["latent"]
+        latent_image = latent["samples"]
+        latent_image = comfy_sample.fix_empty_latent_channels(
+            model,
+            latent_image,
+            latent.get("downscale_ratio_spacial", None),
+            latent.get("downscale_ratio_temporal", None),
+        )
+        batch_inds = latent.get("batch_index")
+        noise = comfy_sample.prepare_noise(latent_image, seed, batch_inds)
+        noise_mask = latent.get("noise_mask")
+
+        callback = latent_preview.prepare_callback(model, steps)
+        samples = comfy_sample.sample(
+            model,
+            noise,
+            steps,
+            cfg,
+            sampler_name,
+            scheduler,
+            bundle["pos_cond"],
+            bundle["neg_cond"],
+            latent_image,
+            denoise=denoise,
+            noise_mask=noise_mask,
+            callback=callback,
+            disable_pbar=not comfy_utils.PROGRESS_BAR_ENABLED,
+            seed=seed,
+        )
+
+        out_latent = dict(latent)
+        out_latent.pop("downscale_ratio_spacial", None)
+        out_latent.pop("downscale_ratio_temporal", None)
+        out_latent["samples"] = samples
+
+        new_bundle = dict(bundle)
+        new_bundle["latent"] = out_latent
+
+        ui: dict[str, Any] = {}
+        if vae_decode:
+            images = bundle["vae"].decode(samples)
+            new_bundle["img"] = images
+            try:
+                ui["images"] = save_temp_previews(images)
+            except Exception:  # noqa: BLE001 - preview must not kill sampling
+                logger.exception(
+                    "T2I Sampler: temp preview save failed; continuing "
+                    "without preview ui"
+                )
+
+        info_out = with_sampling(
+            info if isinstance(info, dict) else {},
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
+            sampler=sampler_name,
+            scheduler=scheduler,
+            denoise=denoise,
+            vae_decode=vae_decode,
+        )
+        return {"ui": ui, "result": (new_bundle, info_out)}
+
+
 def comfy_utils_load_torch_file(path: str) -> tuple[Any, Any]:
     '''Load a torch file with metadata (runtime only).
 
@@ -985,6 +1210,52 @@ def comfy_utils_load_torch_file(path: str) -> tuple[Any, Any]:
     return comfy_utils.load_torch_file(
         path, safe_load=True, return_metadata=True
     )
+
+
+def save_temp_previews(
+    images: Any,
+    filename_prefix: str = "LukutarT2I",
+) -> list[dict[str, str]]:
+    '''Save IMAGE frames as temp PNGs for the frontend preview.
+
+    Mirrors the file layout of ComfyUI's own PreviewImage: temp
+    directory, counter-suffixed names, ``type: "temp"`` references.
+
+    Args:
+        images: ``(B, H, W, 3)`` float [0,1] RGB tensor.
+        filename_prefix: Base file name.
+
+    Returns:
+        List of ``{"filename", "subfolder", "type"}`` ui references.
+
+    Raises:
+        RuntimeError: When called outside the ComfyUI runtime.
+    '''
+    if folder_paths is None or Image is None or np is None:
+        raise RuntimeError("Previews require the ComfyUI runtime.")
+    prefix = filename_prefix + "_temp_"
+    full_output_folder, filename, counter, subfolder, _ = (
+        folder_paths.get_save_image_path(
+            prefix,
+            folder_paths.get_temp_directory(),
+            images.shape[1],
+            images.shape[0],
+        )
+    )
+    results: list[dict[str, str]] = []
+    for batch_number, frame in enumerate(images):
+        arr = 255.0 * frame.cpu().numpy()
+        pil_image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+        base = filename.replace("%batch_num%", str(batch_number))
+        file = f"{base}_{counter:05}_.png"
+        pil_image.save(
+            os.path.join(full_output_folder, file), compress_level=1
+        )
+        results.append(
+            {"filename": file, "subfolder": subfolder, "type": "temp"}
+        )
+        counter += 1
+    return results
 
 
 class T2IBundleUnpackNode:
@@ -1149,7 +1420,9 @@ __all__ = [
     "T2IBundleUnpackNode",
     "T2ILoaderNode",
     "T2ILoraListNode",
+    "T2ISamplerNode",
     "advanced_encode",
     "encode_conditioning",
+    "save_temp_previews",
     "validate_bundle",
 ]

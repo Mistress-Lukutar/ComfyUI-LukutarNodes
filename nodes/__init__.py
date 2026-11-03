@@ -41,6 +41,7 @@ from .t2i import (
     T2IBundleUnpackNode,
     T2ILoaderNode,
     T2ILoraListNode,
+    T2ISamplerNode,
 )
 from .variables import GetVariableNode, SetVariableNode
 
@@ -62,6 +63,7 @@ NODE_CLASS_MAPPINGS: dict[str, type] = {
     "GetVariable": GetVariableNode,
     "T2ILoader": T2ILoaderNode,
     "T2ILoraList": T2ILoraListNode,
+    "T2ISampler": T2ISamplerNode,
     "T2IBundleUnpack": T2IBundleUnpackNode,
     "T2IBundlePack": T2IBundlePackNode,
     "LukutarSaveImage": SaveImageNode,
@@ -94,6 +96,7 @@ NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
     "GetVariable": "Get Variable",
     "T2ILoader": "T2I Loader",
     "T2ILoraList": "T2I LoRA List",
+    "T2ISampler": "T2I Sampler",
     "T2IBundleUnpack": "T2I Bundle Unpack",
     "T2IBundlePack": "T2I Bundle Pack",
     "LukutarSaveImage": "Save Image (Metadata)",
@@ -138,6 +141,7 @@ __all__ = [
     "T2IBundleUnpackNode",
     "T2ILoaderNode",
     "T2ILoraListNode",
+    "T2ISamplerNode",
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
 ]

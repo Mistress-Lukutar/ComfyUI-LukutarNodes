@@ -14,10 +14,14 @@ from __future__ import annotations
 import pytest
 from comfyui_lukutar_nodes.nodes.t2i import (
     BUNDLE_KEYS,
+    BUNDLE_TYPE,
+    INFO_TYPE,
     MAX_LORA_SLOTS,
     T2IBundlePackNode,
     T2ILoaderNode,
     T2ILoraListNode,
+    T2ISamplerNode,
+    save_temp_previews,
     validate_bundle,
 )
 
@@ -163,3 +167,61 @@ def test_loader_node_has_lora_cache_slot() -> None:
     """The per-instance LoRA cache starts empty."""
     node = T2ILoaderNode()
     assert node.loaded_lora is None
+
+
+# ======================================================================
+# T2ISamplerNode (outside-runtime behavior)
+# ======================================================================
+
+
+def test_sampler_node_is_output_node() -> None:
+    """The sampler must be an OUTPUT_NODE so previews render."""
+    assert T2ISamplerNode.OUTPUT_NODE is True
+
+
+def test_sampler_node_io_types() -> None:
+    """The sampler consumes and re-emits bundle + info."""
+    assert T2ISamplerNode.RETURN_TYPES == (BUNDLE_TYPE, INFO_TYPE)
+    assert T2ISamplerNode.RETURN_NAMES == ("bundle", "info")
+
+
+def test_sampler_node_input_widgets() -> None:
+    """Required widget set covers seed..vae_decode."""
+    inputs = T2ISamplerNode.INPUT_TYPES()["required"]
+    for name in (
+        "bundle",
+        "info",
+        "seed",
+        "steps",
+        "cfg",
+        "sampler_name",
+        "scheduler",
+        "denoise",
+        "vae_decode",
+    ):
+        assert name in inputs
+    assert inputs["vae_decode"][0] == "BOOLEAN"
+    assert inputs["vae_decode"][1]["default"] is True
+
+
+def test_sampler_node_raises_outside_runtime() -> None:
+    """sample() refuses to run without the ComfyUI runtime."""
+    node = T2ISamplerNode()
+    with pytest.raises(RuntimeError, match="ComfyUI runtime"):
+        node.sample(
+            bundle={key: None for key in BUNDLE_KEYS},
+            info={},
+            seed=0,
+            steps=1,
+            cfg=7.0,
+            sampler_name="euler",
+            scheduler="normal",
+            denoise=1.0,
+            vae_decode=True,
+        )
+
+
+def test_save_temp_previews_raises_outside_runtime() -> None:
+    """Preview saving requires the ComfyUI runtime."""
+    with pytest.raises(RuntimeError, match="ComfyUI runtime"):
+        save_temp_previews(object())

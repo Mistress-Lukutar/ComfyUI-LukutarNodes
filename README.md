@@ -75,6 +75,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
   its portable info entity (`Lukutar/T2I`).
 - **T2I LoRA List** — collect several LoRAs with weights into one list
   socket for the T2I Loader (`Lukutar/T2I`).
+- **T2I Sampler** — sample the T2I bundle like the core KSampler, with
+  a live latent preview and an optional VAE decode whose image replaces
+  the noise preview (`Lukutar/T2I`).
 - **T2I Bundle Unpack** / **T2I Bundle Pack** — split a LUKUTAR_BUNDLE
   into standard sockets and reassemble it (`Lukutar/T2I`).
 - **Paste (Clipspace, Keep Mask)** / **Paste Image (Keep Mask)** —
@@ -798,6 +801,55 @@ bundle latent) while no sampler has decoded one yet.
 **T2I Bundle Pack** — inputs `model`, `clip`, `vae`, `pos_cond`,
 `neg_cond`, `latent` and optional `img` (IMAGE), output `bundle`
 (LUKUTAR_BUNDLE).
+
+### T2I Sampler
+
+Samples the bundle's latent exactly like the core KSampler and
+re-emits the bundle plus the info entity (`Lukutar/T2I`).
+
+#### Inputs / Outputs
+
+| Direction | Name | Type | Description |
+|-----------|------|------|-------------|
+| input | bundle | LUKUTAR_BUNDLE | Bundle from the T2I Loader (or another sampler). |
+| input | info | LUKUTAR_INFO | Info entity to extend. |
+| output | bundle | LUKUTAR_BUNDLE | Copy of the input bundle with the sampled latent. |
+| output | info | LUKUTAR_INFO | Copy of the input info with the sampling entries appended. |
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| seed | INT | 0 | Noise seed, with the standard `control_after_generate` behavior. |
+| steps | INT | 20 | Denoising step count. |
+| cfg | FLOAT | 7.0 | Classifier-free guidance scale (0–100). |
+| sampler_name | COMBO | — | ComfyUI sampler list. |
+| scheduler | COMBO | — | ComfyUI scheduler list. |
+| denoise | FLOAT | 1.0 | Denoise strength; below 1.0 keeps the input latent structure (img2img). |
+| vae_decode | BOOLEAN | True | Decode the finished samples to IMAGE. |
+
+#### Preview behaviour
+
+- While sampling, the node shows the standard ComfyUI latent preview —
+  the same progress stream every core sampler emits, honouring the
+  server's preview-method settings (TAESD / Latent2RGB).
+- With `vae_decode` enabled, the finished samples are decoded through
+  the bundle's VAE, stored into the bundle's `img` slot and rendered as
+  temp PNGs through the node's output ui. Because the node is an
+  `OUTPUT_NODE` (like PreviewImage), the frontend replaces the noise
+  preview with the decoded image on completion in both the Vue and the
+  legacy canvas renderers — no custom preview code involved.
+- With `vae_decode` disabled the bundle's `img` slot stays as it was
+  (empty on a fresh loader bundle) and no preview ui is emitted.
+- The sampling result is never cached: an `OUTPUT_NODE` re-executes on
+  every queue, matching A1111's re-run semantics.
+- A failed temp-preview save is logged and does not abort sampling.
+
+#### Info entries appended
+
+`Seed`, `Steps`, `CFG scale`, `Sampler`, `Schedule type`,
+`Denoising strength`, `VAE decode` (`enabled`/`disabled`) — appended to
+a copy of the input info; the input mapping is never mutated.
 
 ### Save Image (Metadata)
 
