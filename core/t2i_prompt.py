@@ -42,7 +42,7 @@ TOKEN_NORMALIZATION: tuple[str, ...] = (
 )
 
 #: Default token normalization combo entry.
-DEFAULT_TOKEN_NORMALIZATION: str = "none"
+DEFAULT_TOKEN_NORMALIZATION: str = "mean"
 
 #: Weight interpretation options (mirrors the BNK-style combos).
 #:

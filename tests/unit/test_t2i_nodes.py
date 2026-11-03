@@ -21,6 +21,7 @@ from comfyui_lukutar_nodes.nodes.t2i import (
     T2ILoaderNode,
     T2ILoraListNode,
     T2ISamplerNode,
+    _interpret_key,
     save_temp_previews,
     validate_bundle,
 )
@@ -225,3 +226,75 @@ def test_save_temp_previews_raises_outside_runtime() -> None:
     """Preview saving requires the ComfyUI runtime."""
     with pytest.raises(RuntimeError, match="ComfyUI runtime"):
         save_temp_previews(object())
+
+
+# ======================================================================
+# _interpret_key token structure (regression: double-wrapped pairs)
+# ======================================================================
+
+
+def _fake_rows() -> list[list[tuple[int, float, int]]]:
+    """Mimic CLIP.tokenize(return_word_ids=True) output for one line."""
+    # BOS, weighted word ("cat" spread over 2 tokens), EOS, pads.
+    return [
+        [
+            (49406, 1.0, 0),
+            (2368, 1.3, 1),
+            (320, 1.3, 1),
+            (49407, 1.0, 0),
+        ]
+        + [(0, 1.0, 0)] * 4
+    ]
+
+
+def test_interpret_key_comfy_passes_flat_pairs() -> None:
+    """The comfy branch must pass flat (token, weight) pairs onward.
+
+    Regression: zipping the (token, weight) pair rows with the weight
+    matrix again produced ((token, weight), weight) entries, which
+    ComfyUI's encode_token_weights forwards unstripped and
+    process_tokens crashes on ('tuple' has no attribute 'get').
+    """
+    captured: list = []
+
+    def fake_encode(lines):
+        captured.append(lines)
+        return object(), object()
+
+    _interpret_key(
+        fake_encode, _fake_rows(), "none", "comfy", 1.0
+    )
+    (line,) = captured[-1]
+    assert line[0] == (49406, 1.0)
+    assert line[1] == (2368, 1.3)
+    assert all(isinstance(t, int) and isinstance(w, float) for t, w in line)
+
+
+def test_interpret_key_comfy_applies_normalization() -> None:
+    """'mean' normalization shifts the weights before encoding."""
+    captured: list = []
+
+    def fake_encode(lines):
+        captured.append(lines)
+        return object(), object()
+
+    _interpret_key(fake_encode, _fake_rows(), "mean", "comfy", 1.0)
+    (line,) = captured[-1]
+    pairs = zip(line, _fake_rows()[0], strict=True)
+    real = [w for (t, w), (rt, _, rid) in pairs if rid != 0]
+    assert sum(real) / len(real) == pytest.approx(1.0)
+
+
+def test_interpret_key_a1111_encodes_unweighted() -> None:
+    """The A1111 branch encodes the unweighted base (all weights 1.0)."""
+    captured: list = []
+
+    def fake_encode(lines):
+        captured.append(lines)
+        # Base embedding path needs torch; only assert the call shape.
+        raise RuntimeError("stop before tensor math")
+
+    with pytest.raises(RuntimeError, match="stop before tensor math"):
+        _interpret_key(fake_encode, _fake_rows(), "none", "A1111", 1.0)
+    (line,) = captured[-1]
+    assert line[1] == (2368, 1.0)  # weight neutralized in the base encode

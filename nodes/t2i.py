@@ -93,7 +93,9 @@ from ..core.t2i_info import (
     get as get_info,
 )
 from ..core.t2i_prompt import (
+    DEFAULT_TOKEN_NORMALIZATION,
     DEFAULT_W_MAX,
+    DEFAULT_WEIGHT_INTERPRETATION,
     TOKEN_NORMALIZATION,
     WEIGHT_INTERPRETATION,
     normalize_weights,
@@ -344,7 +346,7 @@ def _down_weight(
         if not idxs:
             rows.append(base_row)
             continue
-        parts = [base_row.unsqueeze(0)] + [embs[i] for i in idxs]
+        parts = [base_row.unsqueeze(0), embs[idxs]]
         stacked = torch.cat(parts, dim=0).to(dtype=base_emb.dtype)
         coefs = torch.tensor(
             mix_weights[b], dtype=base_emb.dtype, device=base_emb.device
@@ -458,7 +460,9 @@ def _interpret_key(
         Tuple of (conditioning embedding ``(1, batch * token_len,
         dim)``, pooled output tensor or ``None``).
     '''
-    tokens: list[_TokenLine] = [[(t, w) for t, w, _ in row] for row in token_rows]
+    token_ints: list[list[int]] = [
+        [t for t, _, _ in row] for row in token_rows
+    ]
     weights: _WeightMatrix = [[w for _, w, _ in row] for row in token_rows]
     word_ids: _WordIdMatrix = [[wid for _, _, wid in row] for row in token_rows]
     weights = normalize_weights(token_normalization, word_ids, weights)
@@ -466,13 +470,16 @@ def _interpret_key(
 
     if weight_interpretation == "comfy":
         weighted = [
-            [(t, w) for t, w in zip(trow, wrow, strict=True)]
-            for trow, wrow in zip(tokens, weights, strict=True)
+            [
+                (t, w)
+                for t, w in zip(tirow, wrow, strict=True)
+            ]
+            for tirow, wrow in zip(token_ints, weights, strict=True)
         ]
         return encode_func(weighted)
 
     unweighted: list[_TokenLine] = [
-        [(t, 1.0) for t in trow] for trow in tokens
+        [(t, 1.0) for t in tirow] for tirow in token_ints
     ]
     base_emb, pooled_base = encode_func(unweighted)
 
@@ -487,9 +494,9 @@ def _interpret_key(
         pos_tokens: list[_TokenLine] = [
             [
                 (t, w) if w >= 1.0 else (t, 1.0)
-                for t, w in zip(trow, wrow, strict=True)
+                for t, w in zip(tirow, wrow, strict=True)
             ]
-            for trow, wrow in zip(tokens, weights, strict=True)
+            for tirow, wrow in zip(token_ints, weights, strict=True)
         ]
         pos_emb, _ = encode_func(pos_tokens)
         mixed = _down_weight(
@@ -763,7 +770,7 @@ class T2ILoaderNode:
                 "clip_skip": (
                     "INT",
                     {
-                        "default": -1,
+                        "default": -2,
                         "min": -24,
                         "max": -1,
                         "step": 1,
@@ -818,11 +825,17 @@ class T2ILoaderNode:
                 ),
                 "token_normalization": (
                     TOKEN_NORMALIZATION,
-                    {"tooltip": "How token weights are normalized."},
+                    {
+                        "default": DEFAULT_TOKEN_NORMALIZATION,
+                        "tooltip": "How token weights are normalized.",
+                    },
                 ),
                 "weight_interpretation": (
                     WEIGHT_INTERPRETATION,
-                    {"tooltip": "How (text:weight) syntax is interpreted."},
+                    {
+                        "default": DEFAULT_WEIGHT_INTERPRETATION,
+                        "tooltip": "How (text:weight) syntax is interpreted.",
+                    },
                 ),
                 "batch_size": (
                     "INT",
@@ -950,6 +963,16 @@ class T2ILoaderNode:
             output_clip=True,
             embedding_directory=folder_paths.get_folder_paths("embeddings"),
         )[:3]
+        if clip is None:
+            raise RuntimeError(
+                f"Checkpoint {ckpt_name!r} has no CLIP text encoder; "
+                "the T2I Loader needs a full checkpoint."
+            )
+        if vae_model is None:
+            raise RuntimeError(
+                f"Checkpoint {ckpt_name!r} has no VAE; pick a VAE file "
+                "in the 'vae' widget."
+            )
 
         applied, lora_hashes = self._apply_loras(model, clip, lora_list)
 

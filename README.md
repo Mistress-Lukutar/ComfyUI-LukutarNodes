@@ -731,11 +731,11 @@ two entities:
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | ckpt_name | COMBO | — | Checkpoint file. |
-| clip_skip | INT | -1 | CLIP layer to stop at; -1 is the standard output layer. |
+| clip_skip | INT | -2 | CLIP layer to stop at; -1 is the standard output layer. |
 | vae | COMBO | baked | `baked` uses the checkpoint's own VAE; any other entry loads a standalone VAE file. |
 | positive / negative | STRING (multiline) | "" | Prompts, encoded with the weighted prompt engine. |
 | width / height | INT | 1024 | Latent geometry in pixels, step 8. |
-| token_normalization | COMBO | none | `none`, `mean`, `length`, `length+mean` — how token weights are normalized before interpretation. |
+| token_normalization | COMBO | mean | `none`, `mean`, `length`, `length+mean` — how token weights are normalized before interpretation. |
 | weight_interpretation | COMBO | comfy | `comfy`, `A1111`, `compel`, `comfy++`, `down_weight` — how `(text:weight)` syntax is applied. |
 | batch_size | INT | 1 | Latent batch size. |
 
