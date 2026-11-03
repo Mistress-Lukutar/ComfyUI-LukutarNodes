@@ -1041,12 +1041,12 @@ class T2ISamplerNode:
     latent: the latent progress preview is shown by ComfyUI itself
     (respecting the server preview settings).  When ``vae_decode`` is
     enabled the finished samples are decoded to IMAGE, stored back into
-    the bundle's ``img`` slot and rendered as temp previews — the
-    standard output-node mechanism swaps the noise preview for the
-    final image.
+    the bundle's ``img`` slot, and the first decoded frame is pushed
+    through the binary preview channel so it replaces the noise frame
+    on the node in both frontend renderers.
 
     The node is an ``OUTPUT_NODE`` (like PreviewImage), so it always
-    re-executes and displays its previews even without connected
+    re-executes and displays its preview even without connected
     outputs.
     '''
 
@@ -1239,24 +1239,16 @@ class T2ISamplerNode:
         new_bundle = dict(bundle)
         new_bundle["latent"] = out_latent
 
-        ui: dict[str, Any] = {}
         if vae_decode:
             images = bundle["vae"].decode(samples)
             new_bundle["img"] = images
-            # Push the decoded image through the binary preview channel
-            # so it REPLACES the last latent preview frame: in the v2
-            # frontend the output display prefers live previews over
-            # executed outputs (until they are revoked on the next
-            # run), and the legacy canvas renderer only draws
-            # node.imgs, which is fed exclusively by preview frames.
+            # The decoded image reaches the frontend EXCLUSIVELY through
+            # the binary preview channel (it replaces the last latent
+            # frame in both renderers).  Deliberately no "executed"
+            # ui.images: the v2 output display prefers preview frames
+            # over outputs, so emitting both renders the same picture
+            # twice on the node.
             _push_final_preview(pbar, images)
-            try:
-                ui["images"] = save_temp_previews(images)
-            except Exception:  # noqa: BLE001 - preview must not kill sampling
-                logger.exception(
-                    "T2I Sampler: temp preview save failed; continuing "
-                    "without preview ui"
-                )
 
         info_out = with_sampling(
             info if isinstance(info, dict) else {},
@@ -1268,7 +1260,7 @@ class T2ISamplerNode:
             denoise=denoise,
             vae_decode=vae_decode,
         )
-        return {"ui": ui, "result": (new_bundle, info_out)}
+        return {"ui": {}, "result": (new_bundle, info_out)}
 
 
 class T2IInfoToA1111Node:
@@ -1491,52 +1483,6 @@ def comfy_utils_load_torch_file(path: str) -> tuple[Any, Any]:
     )
 
 
-def save_temp_previews(
-    images: Any,
-    filename_prefix: str = "LukutarT2I",
-) -> list[dict[str, str]]:
-    '''Save IMAGE frames as temp PNGs for the frontend preview.
-
-    Mirrors the file layout of ComfyUI's own PreviewImage: temp
-    directory, counter-suffixed names, ``type: "temp"`` references.
-
-    Args:
-        images: ``(B, H, W, 3)`` float [0,1] RGB tensor.
-        filename_prefix: Base file name.
-
-    Returns:
-        List of ``{"filename", "subfolder", "type"}`` ui references.
-
-    Raises:
-        RuntimeError: When called outside the ComfyUI runtime.
-    '''
-    if folder_paths is None or Image is None or np is None:
-        raise RuntimeError("Previews require the ComfyUI runtime.")
-    prefix = filename_prefix + "_temp_"
-    full_output_folder, filename, counter, subfolder, _ = (
-        folder_paths.get_save_image_path(
-            prefix,
-            folder_paths.get_temp_directory(),
-            images.shape[1],
-            images.shape[0],
-        )
-    )
-    results: list[dict[str, str]] = []
-    for batch_number, frame in enumerate(images):
-        arr = 255.0 * frame.cpu().numpy()
-        pil_image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-        base = filename.replace("%batch_num%", str(batch_number))
-        file = f"{base}_{counter:05}_.png"
-        pil_image.save(
-            os.path.join(full_output_folder, file), compress_level=1
-        )
-        results.append(
-            {"filename": file, "subfolder": subfolder, "type": "temp"}
-        )
-        counter += 1
-    return results
-
-
 class T2IBundleUnpackNode:
     '''Split a T2I bundle back into standard ComfyUI sockets.
 
@@ -1705,6 +1651,5 @@ __all__ = [
     "T2ISamplerNode",
     "advanced_encode",
     "encode_conditioning",
-    "save_temp_previews",
     "validate_bundle",
 ]

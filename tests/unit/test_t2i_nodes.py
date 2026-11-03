@@ -22,7 +22,6 @@ from comfyui_lukutar_nodes.nodes.t2i import (
     T2ILoraListNode,
     T2ISamplerNode,
     _interpret_key,
-    save_temp_previews,
     validate_bundle,
 )
 
@@ -220,12 +219,6 @@ def test_sampler_node_raises_outside_runtime() -> None:
             denoise=1.0,
             vae_decode=True,
         )
-
-
-def test_save_temp_previews_raises_outside_runtime() -> None:
-    """Preview saving requires the ComfyUI runtime."""
-    with pytest.raises(RuntimeError, match="ComfyUI runtime"):
-        save_temp_previews(object())
 
 
 # ======================================================================

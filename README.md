@@ -847,16 +847,15 @@ re-emits the bundle plus the info entity (`Lukutar/T2I`).
   output display prefers live preview frames over executed outputs
   (which are only revoked on the next run), and the legacy canvas
   renderer draws `node.imgs`, which is fed exclusively by preview
-  frames; pushing the decoded image as the final preview frame covers
-  both renderers. The images are also saved as temp PNGs and returned
-  in the node output ui (standard `PreviewImage` semantics).
+  frames. The node deliberately emits **no** `executed` output ui:
+  the v2 output section would render the same picture a second time
+  below the preview.
 - With `vae_decode` disabled the bundle's `img` slot stays as it was
-  (empty on a fresh loader bundle), no preview ui is emitted and the
-  last latent frame remains as the node preview.
+  (empty on a fresh loader bundle), and the last latent frame remains
+  as the node preview.
 - The sampling result is never cached: an `OUTPUT_NODE` re-executes on
   every queue, matching A1111's re-run semantics.
-- A failed temp-preview save or preview push is logged and does not
-  abort sampling.
+- A failed preview push is logged and does not abort sampling.
 
 #### Info entries appended
 
