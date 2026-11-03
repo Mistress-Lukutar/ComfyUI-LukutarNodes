@@ -61,12 +61,36 @@ try:
 except ImportError:  # pragma: no cover - exercised only outside runtime
     Image = None  # type: ignore[assignment]
 
-from ..core.a1111_parameters import get_model_hash_cache
+from ..core.a1111_parameters import build_parameters, get_model_hash_cache
+from ..core.metadata import METADATA_TYPE
 from ..core.t2i_info import (
+    BATCH_KEY,
+    CFG_KEY,
+    CLIP_SKIP_KEY,
+    DENOISE_KEY,
     INFO_TYPE,
+    LORA_HASHES_KEY,
+    LORA_KEY,
+    MODEL_HASH_KEY,
+    MODEL_KEY,
+    NEGATIVE_KEY,
+    PROMPT_KEY,
+    SAMPLER_KEY,
+    SCHEDULER_KEY,
+    SEED_KEY,
+    SIZE_KEY,
+    STEPS_KEY,
+    TOKEN_NORM_KEY,
+    VAE_DECODE_KEY,
+    VAE_KEY,
+    WEIGHT_INTERP_KEY,
     build_loader_info,
     format_lora_entries,
+    settings_pairs,
     with_sampling,
+)
+from ..core.t2i_info import (
+    get as get_info,
 )
 from ..core.t2i_prompt import (
     DEFAULT_W_MAX,
@@ -1195,6 +1219,182 @@ class T2ISamplerNode:
         return {"ui": ui, "result": (new_bundle, info_out)}
 
 
+class T2IInfoToA1111Node:
+    '''Convert a T2I info entity into an A1111 parameters block.
+
+    Emits a single LUKUTAR_METADATA entry ``{"parameters": text}``
+    where *text* is the A1111 infotext (prompt line, optional
+    ``Negative prompt:`` line, then the settings block), composed by
+    the same engine as the A1111 node set.
+    '''
+
+    CATEGORY = "Lukutar/T2I"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
+        return {
+            "required": {
+                "info": (
+                    INFO_TYPE,
+                    {"tooltip": "Info entity from the T2I pipeline."},
+                ),
+            }
+        }
+
+    RETURN_TYPES = (METADATA_TYPE,)
+    RETURN_NAMES = ("metadata",)
+    FUNCTION = "convert"
+    DESCRIPTION = (
+        "Converts the T2I info entity into the A1111 'parameters' "
+        "metadata block."
+    )
+
+    def convert(self, info: Any) -> tuple[dict[str, str]]:
+        '''Build the A1111 parameters metadata entry.
+
+        Args:
+            info: The info mapping (prompt / negative_prompt keys are
+                separated out; everything else forms the settings
+                block in order).
+
+        Returns:
+            Tuple of (metadata dict,) with the single ``parameters``
+            entry, or an empty dict for an empty info.
+        '''
+        entries = dict(info) if isinstance(info, dict) else {}
+        prompt = entries.pop(PROMPT_KEY, "")
+        negative = entries.pop(NEGATIVE_KEY, "")
+        text = build_parameters(prompt, negative, settings_pairs(entries))
+        metadata: dict[str, str] = {"parameters": text} if text else {}
+        return (metadata,)
+
+
+class T2IInfoUnpackNode:
+    '''Split a T2I info entity into named string outputs.
+
+    Missing entries yield empty strings. The ``metadata`` output is a
+    copy of the whole mapping for direct LUKUTAR_METADATA consumers.
+    '''
+
+    CATEGORY = "Lukutar/T2I"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
+        return {
+            "required": {
+                "info": (
+                    INFO_TYPE,
+                    {"tooltip": "Info entity from the T2I pipeline."},
+                ),
+            }
+        }
+
+    #: Output name -> info key mapping, in output order.
+    _OUTPUT_KEYS: tuple[tuple[str, str], ...] = (
+        ("model_name", MODEL_KEY),
+        ("model_hash", MODEL_HASH_KEY),
+        ("vae_name", VAE_KEY),
+        ("lora", LORA_KEY),
+        ("lora_hashes", LORA_HASHES_KEY),
+        ("prompt", PROMPT_KEY),
+        ("negative", NEGATIVE_KEY),
+        ("size", SIZE_KEY),
+        ("batch_size", BATCH_KEY),
+        ("clip_skip", CLIP_SKIP_KEY),
+        ("token_normalization", TOKEN_NORM_KEY),
+        ("weight_interpretation", WEIGHT_INTERP_KEY),
+        ("seed", SEED_KEY),
+        ("steps", STEPS_KEY),
+        ("cfg", CFG_KEY),
+        ("sampler", SAMPLER_KEY),
+        ("scheduler", SCHEDULER_KEY),
+        ("denoise", DENOISE_KEY),
+        ("vae_decode", VAE_DECODE_KEY),
+    )
+
+    RETURN_TYPES = ("STRING",) * len(_OUTPUT_KEYS) + (METADATA_TYPE,)
+    RETURN_NAMES = tuple(name for name, _ in _OUTPUT_KEYS) + ("metadata",)
+    FUNCTION = "unpack"
+    DESCRIPTION = "Reads the standard info entries as separate strings."
+
+    def unpack(self, info: Any) -> tuple[Any, ...]:
+        '''Extract the standard info entries.
+
+        Args:
+            info: The info mapping.
+
+        Returns:
+            One string per :data:`_OUTPUT_KEYS` entry (``""`` when
+            missing) followed by a copy of the whole mapping.
+        '''
+        strings = tuple(
+            get_info(info, key) for _, key in self._OUTPUT_KEYS
+        )
+        metadata = dict(info) if isinstance(info, dict) else {}
+        return strings + (metadata,)
+
+
+class T2IInfoPackNode:
+    '''Assemble a T2I info entity from an optional base plus pairs.
+
+    Mirrors Merge Metadata: up to four key/value pairs are layered on
+    top of an optional input info (later pairs win). Pairs with an
+    empty key are skipped; ``web/js/t2i_info_pack.js`` keeps only the
+    claimed pairs plus one free row visible.
+    '''
+
+    CATEGORY = "Lukutar/T2I"
+
+    #: Number of editable key/value pairs.
+    MAX_INFO_PAIRS: int = 4
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
+        required: dict[str, Any] = {}
+        for i in range(1, cls.MAX_INFO_PAIRS + 1):
+            required[f"key_{i}"] = (
+                "STRING",
+                {"default": "", "tooltip": f"Info key {i}; empty = unused."},
+            )
+            required[f"value_{i}"] = (
+                "STRING",
+                {"default": "", "tooltip": f"Info value {i}."},
+            )
+        return {
+            "required": required,
+            "optional": {
+                "info_in": (
+                    INFO_TYPE,
+                    {"tooltip": "Optional base info to extend."},
+                ),
+            },
+        }
+
+    RETURN_TYPES = (INFO_TYPE,)
+    RETURN_NAMES = ("info",)
+    FUNCTION = "pack"
+    DESCRIPTION = "Builds a T2I info entity from key/value pairs."
+
+    def pack(self, **kwargs: Any) -> tuple[dict[str, str]]:
+        '''Merge the base info and the key/value pairs.
+
+        Args:
+            **kwargs: ``key_N``/``value_N`` strings and the optional
+                ``info_in`` mapping.
+
+        Returns:
+            Tuple of (info dict,).
+        '''
+        base = kwargs.get("info_in")
+        merged: dict[str, str] = dict(base) if isinstance(base, dict) else {}
+        for i in range(1, self.MAX_INFO_PAIRS + 1):
+            key = str(kwargs.get(f"key_{i}", "")).strip()
+            if not key:
+                continue
+            merged[key] = str(kwargs.get(f"value_{i}", "")).strip()
+        return (merged,)
+
+
 def comfy_utils_load_torch_file(path: str) -> tuple[Any, Any]:
     '''Load a torch file with metadata (runtime only).
 
@@ -1420,6 +1620,9 @@ __all__ = [
     "T2IBundleUnpackNode",
     "T2ILoaderNode",
     "T2ILoraListNode",
+    "T2IInfoPackNode",
+    "T2IInfoToA1111Node",
+    "T2IInfoUnpackNode",
     "T2ISamplerNode",
     "advanced_encode",
     "encode_conditioning",

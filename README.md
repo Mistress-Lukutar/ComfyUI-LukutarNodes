@@ -78,6 +78,12 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **T2I Sampler** — sample the T2I bundle like the core KSampler, with
   a live latent preview and an optional VAE decode whose image replaces
   the noise preview (`Lukutar/T2I`).
+- **Info to A1111 Parameters** — convert the T2I info entity into the
+  A1111 `parameters` metadata block (`Lukutar/T2I`).
+- **T2I Info Unpack** — read the standard info entries as separate
+  string outputs (`Lukutar/T2I`).
+- **T2I Info Pack** — assemble a T2I info entity from an optional base
+  plus key/value pairs (`Lukutar/T2I`).
 - **T2I Bundle Unpack** / **T2I Bundle Pack** — split a LUKUTAR_BUNDLE
   into standard sockets and reassemble it (`Lukutar/T2I`).
 - **Paste (Clipspace, Keep Mask)** / **Paste Image (Keep Mask)** —
@@ -850,6 +856,37 @@ re-emits the bundle plus the info entity (`Lukutar/T2I`).
 `Seed`, `Steps`, `CFG scale`, `Sampler`, `Schedule type`,
 `Denoising strength`, `VAE decode` (`enabled`/`disabled`) — appended to
 a copy of the input info; the input mapping is never mutated.
+
+### Info to A1111 Parameters
+
+Converts a LUKUTAR_INFO entity into the A1111 `parameters` metadata
+block (`Lukutar/T2I`). One input (`info`), one output (`metadata`,
+LUKUTAR_METADATA): `{"parameters": text}` where *text* is the full
+A1111 infotext — prompt line, optional `Negative prompt:` line, then
+the settings block in info order — composed by the same
+`build_parameters` engine the A1111 nodes use. The prompt keys are
+never emitted as settings pairs; an empty info yields an empty
+metadata dict. The output plugs into Merge Metadata, Save Image
+(Metadata) or any LUKUTAR_METADATA consumer.
+
+### T2I Info Unpack
+
+Reads the standard info entries as named STRING outputs
+(`Lukutar/T2I`): `model_name`, `model_hash`, `vae_name`, `lora`,
+`lora_hashes`, `prompt`, `negative`, `size`, `batch_size`,
+`clip_skip`, `token_normalization`, `weight_interpretation`, `seed`,
+`steps`, `cfg`, `sampler`, `scheduler`, `denoise`, `vae_decode`.
+Missing entries yield `""`. The trailing `metadata` output is a copy
+of the whole mapping as LUKUTAR_METADATA.
+
+### T2I Info Pack
+
+Assembles a LUKUTAR_INFO entity (`Lukutar/T2I`): an optional
+`info_in` base extended by up to four `key_N`/`value_N` string pairs
+(later pairs win, empty keys are skipped, values are stripped). The
+web extension `web/js/t2i_info_pack.js` shows every claimed pair plus
+one free trailing pair and hides the rest; without the web assets the
+node still works with all four pairs visible.
 
 ### Save Image (Metadata)
 
