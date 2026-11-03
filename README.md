@@ -283,15 +283,11 @@ stops growing and scrolls instead. The mouse wheel scrolls the field
 while it has somewhere to scroll; once the field is at its top/bottom
 edge (or has no overflow at all) the wheel zooms the canvas underneath.
 The built-in text widget is only
-hidden, so the value keeps serializing into the workflow normally. The
-**Annotate...** button opens a popup editor with the same
-live-highlighted input, larger, plus a palette of the labels already
-used in the text — click one to wrap the current selection. Standard
-ComfyUI text shortcuts work in both inputs: Ctrl+Enter queues the
-workflow (in the popup it saves the editor instead) and Ctrl+Up/Down
-adjusts attention weight around the caret. The node
-works without the web assets too — the markup is plain text and can be
-typed by hand.
+hidden, so the value keeps serializing into the workflow normally.
+Standard ComfyUI text shortcuts work in the rich input: Ctrl+Enter queues
+the workflow and Ctrl+Up/Down adjusts attention weight around the caret.
+The node works without the web assets too — the markup is plain text and
+can be typed by hand.
 
 #### Inputs
 
@@ -1184,7 +1180,7 @@ Layout:
 core/    pure numpy/OpenCV engines, no ComfyUI imports
 nodes/   ComfyUI node classes (INPUT_TYPES, tensor glue)
 utils/   torch tensor conversion helpers
-web/js/  frontend extension (prompt annotator popup editor)
+web/js/  frontend extension (rich prompt annotator input)
 tests/   pytest suite + ComfyUI loader smoke test
 ```
 

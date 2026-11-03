@@ -1,6 +1,6 @@
 /**
  * File:   prompt_annotate_editor.js
- * Brief:  Rich highlighted input + popup editor for Prompt Annotate and
+ * Brief:  Rich highlighted input for Prompt Annotate and
  *         mode-aware widget states for Annotation Segment Edit.
  * Author: Mistress-Lukutar
  * Date:   2026-09-01
@@ -13,11 +13,7 @@
  * text widget is only hidden (widget.hidden = true) — it stays in
  * node.widgets, so its value keeps serializing into the workflow.
  *
- * The same rich input (larger) powers the "Annotate..." popup editor
- * with a label palette that wraps the current selection into tags.
- *
- * Sizing: the popup input auto-grows with its content (capped at
- * 60vh); the in-node input is a FILL widget — the node layout owns its
+ * Sizing: the in-node input is a FILL widget — the node layout owns its
  * height (it stretches with the node; the minimum is declared to the
  * layout engine via --comfy-widget-min-height) and typing past the
  * available height grows the node — but only up to MAX_FIELD_HEIGHT.
@@ -88,31 +84,6 @@ const pastel = {
 /* Shared markup helpers                                               */
 /* ------------------------------------------------------------------ */
 
-/** Labels used inside the marked-up text, in order of first use. */
-function labelsInText(text) {
-  const labels = [];
-  TAG_RE.lastIndex = 0;
-  let match;
-  while ((match = TAG_RE.exec(text)) !== null) {
-    for (let label of match[1].split(",")) {
-      label = label.trim();
-      if (label && !labels.includes(label)) labels.push(label);
-    }
-  }
-  return labels;
-}
-
-/** True when the markup looks unbalanced (odd '|' count, ':'-less tags). */
-function markupError(text) {
-  const pipes = (text.match(/\|/g) || []).length;
-  if (pipes % 2 !== 0) return "Odd number of '|' — a tag is not closed.";
-  let stripped = text.replace(TAG_RE, "");
-  if (stripped.includes("|")) {
-    return "A '|' pair is missing the ':' between labels and text.";
-  }
-  return null;
-}
-
 /**
  * Render the RAW markup into a container: pipes and "label:" dimmed,
  * span text highlighted per label, unmarked text plain. The special
@@ -168,19 +139,15 @@ function renderRawMarkup(container, text) {
  * @param {string} options.className Extra class for the wrapper
  *   (e.g. "lk-node-rich" for the compact in-node variant).
  * @param {Function} options.onInput Called with the new text on input.
- * @param {boolean} options.autoGrow  True (popup): the height follows
- *   the content between CSS min-height and max-height. False (in-node):
- *   the height is owned by the node layout and the textarea fills it.
- * @param {Function} options.onOverflow Fill mode only: called with the
- *   pixel shortfall when the content no longer fits the field, so the
- *   host can grow the node (the host decides how much — it caps the
- *   growth so the field scrolls past MAX_FIELD_HEIGHT).
+ * @param {Function} options.onOverflow Called with the pixel shortfall
+ *   when the content no longer fits the field, so the host can grow the
+ *   node (the host decides how much — it caps the growth so the field
+ *   scrolls past MAX_FIELD_HEIGHT).
  */
 function createRichInput({
   value = "",
   className = "",
   onInput = null,
-  autoGrow = true,
   onOverflow = null,
 } = {}) {
   const wrapper = document.createElement("div");
@@ -209,39 +176,25 @@ function createRichInput({
     renderRawMarkup(backdrop, textarea.value);
     syncScroll();
   };
-  // Two sizing modes. autoGrow (popup): no manual resize grip, the
-  // height follows the content between CSS min-height and max-height
-  // (scrollbar appears past the cap). fill (in-node): the node layout
-  // owns the height — the textarea stretches with the node and a
-  // shortfall is reported via onOverflow so the host can grow the node
-  // (no internal cap, no phantom scrollbar while the node has room).
-  const growToContent = () => {
-    textarea.style.height = "auto";
-    const styles = window.getComputedStyle(textarea);
-    const min = parseFloat(styles.minHeight) || 0;
-    const max = parseFloat(styles.maxHeight) || Number.POSITIVE_INFINITY;
-    const needed = textarea.scrollHeight + 2; // + textarea borders
-    textarea.style.height = `${Math.min(Math.max(needed, min), max)}px`;
-  };
+  // Fill mode: the node layout owns the height — the textarea stretches
+  // with the node and a shortfall is reported via onOverflow so the host
+  // can grow the node (no internal cap, no phantom scrollbar while the
+  // node has room).
   const refit = () => {
-    if (autoGrow) growToContent();
     syncSize();
     render();
   };
   const sync = (text) => {
     if (textarea.value !== text) textarea.value = text;
     // No onOverflow here: a loaded workflow's saved node size rules.
-    if (autoGrow) growToContent();
     syncSize();
     render();
   };
 
   textarea.addEventListener("input", () => {
     refit();
-    if (!autoGrow) {
-      const deficit = textarea.scrollHeight - textarea.clientHeight;
-      if (deficit > 0) onOverflow?.(Math.ceil(deficit) + 1);
-    }
+    const deficit = textarea.scrollHeight - textarea.clientHeight;
+    if (deficit > 0) onOverflow?.(Math.ceil(deficit) + 1);
     onInput?.(textarea.value);
   });
   textarea.addEventListener("scroll", syncScroll);
@@ -310,8 +263,7 @@ const STYLE = `
   background: transparent; color: transparent; caret-color: #e8e8e8;
   font: 13px/1.5 monospace; padding: 8px; margin: 0;
   white-space: pre-wrap; word-break: break-word; box-sizing: border-box;
-  width: 100%; min-height: 140px; max-height: 60vh;
-  overflow-y: auto; resize: none;
+  width: 100%; overflow-y: auto; resize: none;
   border: 1px solid #555; border-radius: 4px; outline: none; }
 .lk-rich > textarea:focus { border-color: #777; }
 .lk-rich > textarea::selection { background: rgba(120, 160, 255, 0.3); }
@@ -333,27 +285,6 @@ const STYLE = `
 .lk-rich.lk-node-rich > textarea { flex: 1 1 auto; min-height: 0;
   max-height: none; }
 
-.lk-overlay { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.6);
-  display: flex; align-items: center; justify-content: center; }
-.lk-panel { background: #2b2b2b; color: #dcdcdc; border: 1px solid #555;
-  border-radius: 8px; padding: 14px; width: min(820px, 92vw);
-  display: flex; flex-direction: column; gap: 10px;
-  font: 12px/1.4 sans-serif; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
-.lk-title { font-size: 14px; font-weight: bold; }
-.lk-palette { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-  font-size: 13px; }
-.lk-chip { padding: 3px 10px; border-radius: 10px; cursor: pointer;
-  border: 1px solid #666; background: transparent; }
-.lk-chip:hover { filter: brightness(1.3); }
-.lk-hint { color: #8a8a92; padding: 3px 0; }
-.lk-error { color: #ff8f88; min-height: 14px; }
-.lk-buttons { display: flex; gap: 8px; justify-content: flex-end; }
-.lk-buttons button { padding: 5px 14px; border-radius: 4px; cursor: pointer;
-  border: 1px solid #666; background: #3a3a3a; color: #ddd; }
-.lk-buttons .lk-save { background: #4a7a4a; }
-.lk-tools { display: flex; gap: 8px; }
-.lk-tools button { padding: 3px 10px; border-radius: 4px; cursor: pointer;
-  border: 1px solid #555; background: #333; color: #bbb; font-size: 12px; }
 `;
 
 function ensureStyle() {
@@ -365,7 +296,7 @@ function ensureStyle() {
 }
 
 // Injected at load: the in-node rich input must be styled from its
-// first frame, before any popup has ever been opened.
+// very first frame.
 ensureStyle();
 
 /* ------------------------------------------------------------------ */
@@ -389,7 +320,6 @@ function attachRichInputWidget(node) {
   const rich = createRichInput({
     value: String(textWidget.value ?? ""),
     className: "lk-node-rich",
-    autoGrow: false,
     onInput: (text) => {
       textWidget.value = text;
     },
@@ -431,181 +361,8 @@ function attachRichInputWidget(node) {
   node.widgets.splice(node.widgets.indexOf(widget), 1);
   node.widgets.splice(node.widgets.indexOf(textWidget) + 1, 0, widget);
 
-  // Called after popup-editor saves and on workflow configure.
+  // Called on workflow configure to sync the rich input from saved widget value.
   node.lukutarSyncRichInput = () => rich.sync(String(textWidget.value ?? ""));
-}
-
-/* ------------------------------------------------------------------ */
-/* Popup editor                                                        */
-/* ------------------------------------------------------------------ */
-
-function openEditor(node) {
-  const textWidget = node.widgets?.find((w) => w.name === TEXT_WIDGET);
-  if (!textWidget) return;
-
-  const overlay = document.createElement("div");
-  overlay.className = "lk-overlay";
-
-  const panel = document.createElement("div");
-  panel.className = "lk-panel";
-
-  const title = document.createElement("div");
-  title.className = "lk-title";
-  title.textContent = `Annotate prompt — ${node.title || NODE_NAME}`;
-
-  const palette = document.createElement("div");
-  palette.className = "lk-palette";
-
-  const tools = document.createElement("div");
-  tools.className = "lk-tools";
-  const unwrapBtn = document.createElement("button");
-  unwrapBtn.textContent = "Unwrap selection";
-  const stripBtn = document.createElement("button");
-  stripBtn.textContent = "Strip all markup";
-  tools.append(unwrapBtn, stripBtn);
-
-  const rich = createRichInput({
-    value: String(textWidget.value ?? ""),
-    onInput: () => refresh(),
-  });
-
-  const errorLine = document.createElement("div");
-  errorLine.className = "lk-error";
-
-  const buttons = document.createElement("div");
-  buttons.className = "lk-buttons";
-  const cancelBtn = document.createElement("button");
-  cancelBtn.textContent = "Cancel";
-  const saveBtn = document.createElement("button");
-  saveBtn.className = "lk-save";
-  saveBtn.textContent = "Save";
-  buttons.append(cancelBtn, saveBtn);
-
-  panel.append(title, palette, tools, rich.wrapper, errorLine, buttons);
-  overlay.appendChild(panel);
-  document.body.appendChild(overlay);
-  // Fit the field to its content now that it is laid out — otherwise
-  // it opens at the CSS min-height and jumps on the first keystroke.
-  rich.refit();
-  rich.textarea.focus();
-
-  function close() {
-    overlay.remove();
-  }
-
-  function save() {
-    textWidget.value = rich.textarea.value;
-    node.lukutarSyncRichInput?.();
-    node.setDirtyCanvas(true, true);
-    close();
-  }
-
-  cancelBtn.addEventListener("click", close);
-  saveBtn.addEventListener("click", save);
-  overlay.addEventListener("mousedown", (event) => {
-    if (event.target === overlay) close();
-  });
-  panel.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      close();
-    }
-  });
-  rich.textarea.addEventListener("keydown", (event) => {
-    // Esc and Ctrl+Enter are owned by the editor (close / save — the
-    // latter must not reach the global queue shortcut). Everything
-    // else keeps bubbling so ComfyUI's textarea-aware shortcuts still
-    // work here (e.g. Ctrl+Up/Down attention weight).
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      close();
-    } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-      event.stopPropagation();
-      event.preventDefault();
-      save();
-    }
-  });
-
-  function refresh() {
-    // Palette: labels already used in the text — chips wrap the
-    // current selection for quick re-use. New labels are simply typed
-    // into the markup.
-    const text = rich.textarea.value;
-    const labels = labelsInText(text);
-    palette.replaceChildren();
-    if (!labels.length) {
-      const hint = document.createElement("span");
-      hint.className = "lk-hint";
-      hint.textContent =
-        "labels appear here once used in the text, e.g. |face: ...|";
-      palette.appendChild(hint);
-    }
-    for (const label of labels) {
-      const chip = document.createElement("button");
-      chip.className = "lk-chip";
-      const hue = labelHue(label);
-      chip.style.background = pastel.bg(hue);
-      chip.style.borderColor = pastel.border(hue);
-      chip.style.color = pastel.text(hue);
-      chip.textContent = label;
-      chip.title = `Wrap the selection in |${label}:...|`;
-      chip.addEventListener("click", () => wrapSelection(label));
-      palette.appendChild(chip);
-    }
-
-    errorLine.textContent = markupError(text) ?? "";
-  }
-
-  function wrapSelection(label) {
-    const textarea = rich.textarea;
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? start;
-    const selected = textarea.value.slice(start, end);
-    const tag = `|${label}:${selected}|`;
-    textarea.setRangeText(tag, start, end);
-    textarea.focus();
-    const innerStart = start + label.length + 1;
-    textarea.setSelectionRange(innerStart, innerStart + selected.length);
-    rich.refit();
-    refresh();
-  }
-
-  function unwrapSelection() {
-    const textarea = rich.textarea;
-    const text = textarea.value;
-    const selStart = textarea.selectionStart ?? 0;
-    const selEnd = textarea.selectionEnd ?? selStart;
-    TAG_RE.lastIndex = 0;
-    let match;
-    while ((match = TAG_RE.exec(text)) !== null) {
-      const start = match.index;
-      const end = match.index + match[0].length;
-      const overlaps =
-        (selStart >= start && selStart <= end) ||
-        (selEnd >= start && selEnd <= end) ||
-        (selStart <= start && selEnd >= end);
-      if (overlaps) {
-        textarea.setRangeText(match[2], start, end, "end");
-        textarea.focus();
-        rich.refit();
-        refresh();
-        return;
-      }
-    }
-    errorLine.textContent =
-      "No tag under the selection — put the caret inside a |tag| first.";
-  }
-
-  unwrapBtn.addEventListener("click", unwrapSelection);
-  stripBtn.addEventListener("click", () => {
-    TAG_RE.lastIndex = 0;
-    rich.textarea.value = rich.textarea.value.replace(TAG_RE, "$2");
-    rich.refit();
-    refresh();
-    rich.textarea.focus();
-  });
-
-  refresh();
 }
 
 /* ------------------------------------------------------------------ */
@@ -620,7 +377,6 @@ app.registerExtension({
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       const result = onNodeCreated?.apply(this, arguments);
-      this.addWidget("button", "Annotate...", null, () => openEditor(this));
       attachRichInputWidget(this);
       return result;
     };

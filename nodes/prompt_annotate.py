@@ -73,8 +73,7 @@ class PromptAnnotateNode:
                         "tooltip": (
                             "Prompt with |label: text| markup, e.g. "
                             "'masterpiece, |face:blue eyes, smirk|, "
-                            "|body:thin|'; the Annotate button (web UI) "
-                            "edits it visually"
+                            "|body:thin|'"
                         ),
                     },
                 ),
