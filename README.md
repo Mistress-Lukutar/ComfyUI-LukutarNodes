@@ -79,7 +79,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
   socket for Load Checkpoint (Bundle) (`Lukutar/Bundle`).
 - **KSampler (Bundle)** — sample the bundle like the core KSampler, with
   a live latent preview and an optional VAE decode whose image replaces
-  the noise preview (`Lukutar/Bundle`).
+  the noise preview; the result is saved to temp so it can be
+  opened/copied/saved from the node's right-click menu
+  (`Lukutar/Bundle`).
 - **Info to A1111 Parameters** — convert the info entity into the
   A1111 `parameters` metadata block, filtering out pack-only fields and
   normalising values to the official A1111 infotext format
@@ -100,6 +102,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 > (Bundle)** fixes both: the decoded image is pushed through the same
 > preview channel the latent frames use, so it *replaces* the noise
 > frame in place — one clean picture, no duplicates, in both frontends.
+> The frames are additionally saved to temp and wired into
+> `node.imgs` by the web extension, so the result is copyable via the
+> right-click menu like any PreviewImage output.
 - **Paste (Clipspace, Keep Mask)** / **Paste Image (Keep Mask)** —
   context-menu items for image upload nodes: paste a clipspace image
   or a clipboard image while keeping the node's painted mask
@@ -864,15 +869,26 @@ re-emits the bundle plus the info entity (`Lukutar/Bundle`).
   output display prefers live preview frames over executed outputs
   (which are only revoked on the next run), and the legacy canvas
   renderer draws `node.imgs`, which is fed exclusively by preview
-  frames. The node deliberately emits **no** `executed` output ui:
-  the v2 output section would render the same picture a second time
-  below the preview.
+  frames.
+- The decoded frames are also saved as temp PNGs (same layout as
+  ComfyUI's own PreviewImage: `LukutarBundleKSampler_temp_00001_.png`,
+  …, in the ComfyUI temp directory) and emitted as the `executed`
+  output ui. The `web/js/ksampler_bundle.js` extension consumes them:
+  it keeps the v2 output section hidden (`node.hideOutputImages` — the
+  preview channel already shows the same picture, and the section
+  would render it a second time) and fills `node.imgs` with `/view`
+  URLs of the temp files, which is what the right-click **Open Image /
+  Copy Image / Save Image** menu entries are built from — so the
+  picture can be copied or saved like any PreviewImage output. Without
+  the web extension the pack stays functional but the v2 node shows
+  the picture twice (the legacy canvas renderer is unaffected).
 - With `vae_decode` disabled the bundle's `img` slot stays as it was
-  (empty on a fresh loader bundle), and the last latent frame remains
-  as the node preview.
+  (empty on a fresh loader bundle), no temp files are written and the
+  last latent frame remains as the node preview.
 - The sampling result is never cached: an `OUTPUT_NODE` re-executes on
   every queue, matching A1111's re-run semantics.
-- A failed preview push is logged and does not abort sampling.
+- A failed temp-preview save or preview push is logged and does not
+  abort sampling.
 
 #### Info entries appended
 

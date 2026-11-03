@@ -1311,10 +1311,10 @@ def main() -> None:
 
     merge_node = mappings["MergeMetadata"]()
     (merged,) = merge_node.merge(meta_1=block_a, meta_2=block_b)
-    # Later-wins: model should be from block_b
+    # Smart merge: the same-name "model" entries are comma-joined
     assert merged == {
         "env": "production",
-        "model": "sdxl-v2",
+        "model": "sd-xl, sdxl-v2",
         "revision": "beta",
     }
 

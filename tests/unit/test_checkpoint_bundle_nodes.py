@@ -308,3 +308,13 @@ def test_push_final_preview_noop_outside_runtime() -> None:
     _push_final_preview(fake, None)  # Image/np are None outside runtime
     assert fake.calls == []
     _push_final_preview(None, None)
+
+
+def test_save_temp_previews_raises_outside_runtime() -> None:
+    """Temp preview saving requires the ComfyUI runtime."""
+    from comfyui_lukutar_nodes.nodes.checkpoint_bundle import (
+        save_temp_previews,
+    )
+
+    with pytest.raises(RuntimeError, match="ComfyUI runtime"):
+        save_temp_previews(object())
