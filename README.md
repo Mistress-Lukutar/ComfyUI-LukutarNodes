@@ -70,6 +70,13 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **A1111 Lora Hashes** — hash up to eight LoRA files and emit a single
   `"Lora hashes"` entry in A1111 format
   (`Lukutar/Metadata`).
+- **T2I Loader** — load a checkpoint with optional LoRAs, encode both
+  prompts with selectable weight semantics and emit the T2I bundle plus
+  its portable info entity (`Lukutar/T2I`).
+- **T2I LoRA List** — collect several LoRAs with weights into one list
+  socket for the T2I Loader (`Lukutar/T2I`).
+- **T2I Bundle Unpack** / **T2I Bundle Pack** — split a LUKUTAR_BUNDLE
+  into standard sockets and reassemble it (`Lukutar/T2I`).
 - **Paste (Clipspace, Keep Mask)** / **Paste Image (Keep Mask)** —
   context-menu items for image upload nodes: paste a clipspace image
   or a clipboard image while keeping the node's painted mask
@@ -695,6 +702,102 @@ A zero-input seed generator (`Lukutar/Seeds`): the same `seed` +
   extension falls back to a plain text widget; without the web assets
   the node still works as a plain seed source — the history is simply
   not displayed.
+
+### T2I Loader
+
+One-node checkpoint loader for an A1111-style txt2img pipeline
+(`Lukutar/T2I`). Loads the checkpoint, applies an optional weighted
+LoRA list, encodes both prompts, creates the empty latent and emits
+two entities:
+
+- **bundle** (new socket type **LUKUTAR_BUNDLE**) — a dict carrying
+  `model`, `clip`, `vae`, `pos_cond`, `neg_cond`, `latent` and `img`
+  (initially `None`); consumed by the T2I Sampler and re-emitted by it.
+- **info** (new socket type **LUKUTAR_INFO**) — an ordered
+  `dict[str, str]` describing every parameter for later A1111 metadata
+  conversion (see "Info entity" below).
+
+#### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| ckpt_name | COMBO | — | Checkpoint file. |
+| clip_skip | INT | -1 | CLIP layer to stop at; -1 is the standard output layer. |
+| vae | COMBO | baked | `baked` uses the checkpoint's own VAE; any other entry loads a standalone VAE file. |
+| positive / negative | STRING (multiline) | "" | Prompts, encoded with the weighted prompt engine. |
+| width / height | INT | 1024 | Latent geometry in pixels, step 8. |
+| token_normalization | COMBO | none | `none`, `mean`, `length`, `length+mean` — how token weights are normalized before interpretation. |
+| weight_interpretation | COMBO | comfy | `comfy`, `A1111`, `compel`, `comfy++`, `down_weight` — how `(text:weight)` syntax is applied. |
+| batch_size | INT | 1 | Latent batch size. |
+
+#### Inputs / Outputs
+
+| Direction | Name | Type | Description |
+|-----------|------|------|-------------|
+| input (optional) | lora_list | LUKUTAR_LORA_LIST | Weighted LoRA list from T2I LoRA List. |
+| output | bundle | LUKUTAR_BUNDLE | The generation bundle. |
+| output | info | LUKUTAR_INFO | Textual info entity. |
+
+#### Weighted prompt engine
+
+`comfy` is ComfyUI's native weighting. `A1111` encodes the unweighted
+prompt, scales the embedding from zero per token and renormalizes to
+the base mean (A1111 semantics). `compel`, `comfy++` and `down_weight`
+mix masked prompt variants, matching the BNK-style advanced encoders.
+SD1.x/SD2.x (`l` key) and SDXL (`l` + `g`, pooled from `g`) take the
+full engine; other model compositions (Flux, SD3, ...) fall back to
+ComfyUI's native weighting with a log note.
+
+#### Info entity
+
+The loader fills the LUKUTAR_INFO mapping with, in order: `prompt`,
+`negative_prompt`, `Model`, `Model hash`, `VAE`, `Clip skip`, `Lora`
+(`name:weight` comma-joined), `Lora hashes` (A1111 `name: hash` style),
+`Size` (`"{width} x {height}"`), `Batch size`, `Token normalization`
+and `Weight interpretation`. Later pipeline nodes append their own
+entries to a copy of this mapping; the input mapping is never mutated.
+
+#### Behaviour
+
+- The latent is created with the loaded model's own channel count, so
+  SD1.x, SDXL and newer architectures all work from the same node.
+- Each LoRA is applied to both model and CLIP with the same weight;
+  zero-weight entries are skipped. Files are cached per node instance.
+- The checkpoint and LoRA hashes are computed through the same
+  on-disk-cached SHA-256 engine as the A1111 nodes.
+- The bundle's `img` slot starts as `None`; the T2I Bundle Unpack node
+  reports it as an empty IMAGE tensor until a sampler fills it.
+
+### T2I LoRA List
+
+Collects up to eight LoRAs with per-LoRA weights into one
+**LUKUTAR_LORA_LIST** socket for the T2I Loader (`Lukutar/T2I`). No
+inputs. Each row is a `lora_N` combo (with `None` marking an unused
+slot) and a `weight_N` float in [-3.0, 3.0], step 0.01, applied to both
+model and CLIP.
+
+The web extension `web/js/t2i_lora_list.js` shows every claimed pair
+plus exactly one free trailing pair and hides the rest (same interaction
+as A1111 Lora Hashes). Without the web assets the node still works —
+all eight pairs are simply visible.
+
+Zero-weight and unused entries are dropped by the backend; the output
+is a tuple of `(name, weight)` pairs in slot order.
+
+### T2I Bundle Unpack / T2I Bundle Pack
+
+Convert between the LUKUTAR_BUNDLE entity and standard ComfyUI sockets
+(`Lukutar/T2I`).
+
+**T2I Bundle Unpack** — input `bundle` (LUKUTAR_BUNDLE), outputs
+`model` (MODEL), `clip` (CLIP), `vae` (VAE), `pos_cond` (CONDITIONING),
+`neg_cond` (CONDITIONING), `latent` (LATENT) and `img` (IMAGE). The
+image output is an empty `(0, h, w, 3)` tensor (geometry from the
+bundle latent) while no sampler has decoded one yet.
+
+**T2I Bundle Pack** — inputs `model`, `clip`, `vae`, `pos_cond`,
+`neg_cond`, `latent` and optional `img` (IMAGE), output `bundle`
+(LUKUTAR_BUNDLE).
 
 ### Save Image (Metadata)
 

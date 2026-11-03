@@ -36,6 +36,12 @@ from .save_image_jxl import SaveImageJxlNode
 from .seed_history import SeedHistoryNode
 from .segs_overlay import SegsOverlayNode
 from .segs_set_crop_size import SegsSetCropSizeNode
+from .t2i import (
+    T2IBundlePackNode,
+    T2IBundleUnpackNode,
+    T2ILoaderNode,
+    T2ILoraListNode,
+)
 from .variables import GetVariableNode, SetVariableNode
 
 NODE_CLASS_MAPPINGS: dict[str, type] = {
@@ -54,6 +60,10 @@ NODE_CLASS_MAPPINGS: dict[str, type] = {
     "SeedHistory": SeedHistoryNode,
     "SetVariable": SetVariableNode,
     "GetVariable": GetVariableNode,
+    "T2ILoader": T2ILoaderNode,
+    "T2ILoraList": T2ILoraListNode,
+    "T2IBundleUnpack": T2IBundleUnpackNode,
+    "T2IBundlePack": T2IBundlePackNode,
     "LukutarSaveImage": SaveImageNode,
     "LukutarSaveImageJxl": SaveImageJxlNode,
     "MetadataBlocks": MetadataBlocksNode,
@@ -82,6 +92,10 @@ NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
     "SeedHistory": "Seed History",
     "SetVariable": "Set Variable",
     "GetVariable": "Get Variable",
+    "T2ILoader": "T2I Loader",
+    "T2ILoraList": "T2I LoRA List",
+    "T2IBundleUnpack": "T2I Bundle Unpack",
+    "T2IBundlePack": "T2I Bundle Pack",
     "LukutarSaveImage": "Save Image (Metadata)",
     "LukutarSaveImageJxl": "Save Image JXL",
     "A1111HiresFix": "A1111 Hires Fix",
@@ -120,6 +134,10 @@ __all__ = [
     "SegsSetCropSizeNode",
     "SetVariableNode",
     "StandardMetadataNode",
+    "T2IBundlePackNode",
+    "T2IBundleUnpackNode",
+    "T2ILoaderNode",
+    "T2ILoraListNode",
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
 ]
