@@ -840,16 +840,23 @@ re-emits the bundle plus the info entity (`Lukutar/T2I`).
   the same progress stream every core sampler emits, honouring the
   server's preview-method settings (TAESD / Latent2RGB).
 - With `vae_decode` enabled, the finished samples are decoded through
-  the bundle's VAE, stored into the bundle's `img` slot and rendered as
-  temp PNGs through the node's output ui. Because the node is an
-  `OUTPUT_NODE` (like PreviewImage), the frontend replaces the noise
-  preview with the decoded image on completion in both the Vue and the
-  legacy canvas renderers — no custom preview code involved.
+  the bundle's VAE, stored into the bundle's `img` slot, and the first
+  frame is pushed through the same binary preview channel the latent
+  previews use — so the frontend **replaces** the last noise frame
+  with the decoded image. This matters because the v2 frontend's
+  output display prefers live preview frames over executed outputs
+  (which are only revoked on the next run), and the legacy canvas
+  renderer draws `node.imgs`, which is fed exclusively by preview
+  frames; pushing the decoded image as the final preview frame covers
+  both renderers. The images are also saved as temp PNGs and returned
+  in the node output ui (standard `PreviewImage` semantics).
 - With `vae_decode` disabled the bundle's `img` slot stays as it was
-  (empty on a fresh loader bundle) and no preview ui is emitted.
+  (empty on a fresh loader bundle), no preview ui is emitted and the
+  last latent frame remains as the node preview.
 - The sampling result is never cached: an `OUTPUT_NODE` re-executes on
   every queue, matching A1111's re-run semantics.
-- A failed temp-preview save is logged and does not abort sampling.
+- A failed temp-preview save or preview push is logged and does not
+  abort sampling.
 
 #### Info entries appended
 

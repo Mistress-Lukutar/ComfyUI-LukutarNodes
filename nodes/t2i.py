@@ -1191,7 +1191,29 @@ class T2ISamplerNode:
         noise = comfy_sample.prepare_noise(latent_image, seed, batch_inds)
         noise_mask = latent.get("noise_mask")
 
-        callback = latent_preview.prepare_callback(model, steps)
+        # Own progress callback (replicates
+        # latent_preview.prepare_callback) so the sampler can push a
+        # final preview frame through the same channel afterwards.
+        previewer = latent_preview.get_previewer(
+            model.load_device, model.model.latent_format
+        )
+        pbar = comfy_utils.ProgressBar(steps)
+
+        def progress_callback(
+            step: int,
+            x0: Any,
+            x: Any,
+            total_steps: int,
+        ) -> None:
+            preview = None
+            if previewer is not None:
+                if x0.is_nested:
+                    x0 = x0.tensors[0]
+                preview = previewer.decode_latent_to_preview_image(
+                    "JPEG", x0
+                )
+            pbar.update_absolute(step + 1, total_steps, preview)
+
         samples = comfy_sample.sample(
             model,
             noise,
@@ -1204,7 +1226,7 @@ class T2ISamplerNode:
             latent_image,
             denoise=denoise,
             noise_mask=noise_mask,
-            callback=callback,
+            callback=progress_callback,
             disable_pbar=not comfy_utils.PROGRESS_BAR_ENABLED,
             seed=seed,
         )
@@ -1221,6 +1243,13 @@ class T2ISamplerNode:
         if vae_decode:
             images = bundle["vae"].decode(samples)
             new_bundle["img"] = images
+            # Push the decoded image through the binary preview channel
+            # so it REPLACES the last latent preview frame: in the v2
+            # frontend the output display prefers live previews over
+            # executed outputs (until they are revoked on the next
+            # run), and the legacy canvas renderer only draws
+            # node.imgs, which is fed exclusively by preview frames.
+            _push_final_preview(pbar, images)
             try:
                 ui["images"] = save_temp_previews(images)
             except Exception:  # noqa: BLE001 - preview must not kill sampling
@@ -1416,6 +1445,33 @@ class T2IInfoPackNode:
                 continue
             merged[key] = str(kwargs.get(f"value_{i}", "")).strip()
         return (merged,)
+
+
+def _push_final_preview(pbar: Any, images: Any) -> None:
+    '''Send the decoded image as the final binary preview frame.
+
+    Goes through the same global progress hook the latent previews
+    use, so the frontend replaces the last noise frame with the
+    decoded image (works in both the Vue and the legacy canvas
+    renderers).  Never raises: preview failures are logged only.
+
+    Args:
+        pbar: The sampler's ``comfy.utils.ProgressBar`` (drives the
+            global hook).
+        images: ``(B, H, W, 3)`` float [0,1] decoded image tensor.
+    '''
+    if pbar is None or Image is None or np is None or latent_preview is None:
+        return
+    try:
+        frame = 255.0 * images[0].cpu().numpy()
+        pil_image = Image.fromarray(np.clip(frame, 0, 255).astype(np.uint8))
+        pbar.update_absolute(
+            pbar.total,
+            pbar.total,
+            ("JPEG", pil_image, latent_preview.MAX_PREVIEW_RESOLUTION),
+        )
+    except Exception:  # noqa: BLE001 - preview must not kill sampling
+        logger.exception("T2I Sampler: final preview push failed")
 
 
 def comfy_utils_load_torch_file(path: str) -> tuple[Any, Any]:

@@ -298,3 +298,20 @@ def test_interpret_key_a1111_encodes_unweighted() -> None:
         _interpret_key(fake_encode, _fake_rows(), "none", "A1111", 1.0)
     (line,) = captured[-1]
     assert line[1] == (2368, 1.0)  # weight neutralized in the base encode
+
+
+def test_push_final_preview_noop_outside_runtime() -> None:
+    """The final-preview push is a silent no-op without the runtime."""
+    from comfyui_lukutar_nodes.nodes.t2i import _push_final_preview
+
+    class FakePbar:
+        total = 10
+        calls: list = []
+
+        def update_absolute(self, value, total=None, preview=None):
+            self.calls.append((value, total, preview))
+
+    fake = FakePbar()
+    _push_final_preview(fake, None)  # Image/np are None outside runtime
+    assert fake.calls == []
+    _push_final_preview(None, None)
