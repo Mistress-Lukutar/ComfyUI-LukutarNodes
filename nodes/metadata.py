@@ -16,7 +16,7 @@ from ..core.metadata import (
     MAX_METADATA_BLOCKS,
     METADATA_TYPE,
     build_metadata,
-    merge_metadata,
+    merge_metadata_smart,
     sort_meta_inputs,
     standard_metadata,
 )
@@ -189,14 +189,18 @@ class StandardMetadataNode:
 
 
 class MergeMetadataNode:
-    '''Merge several metadata blocks into one.
+    '''Merge several metadata blocks into one without duplicates.
 
     The ``INPUT_TYPES`` returns an empty ``{"required": {}}`` because
     slot inputs are grown client-side by
     ``web/js/metadata_merge.js`` (same mechanism as Set/Get Bundle).
     Hand-written API prompts may pass ``meta_1``, ``meta_2``, ... links
     ordered by natural ``meta_N`` order. The backend resolves them via
-    :func:`sort_meta_inputs` and delegates to :func:`merge_metadata`.
+    :func:`sort_meta_inputs` and delegates to
+    :func:`merge_metadata_smart`: same-name blocks get their values
+    joined, a name that appears as a ``"Key: value"`` entry inside
+    another block's A1111 settings line is folded into that entry, and
+    anything else becomes a new block.
     '''
 
     CATEGORY = "Lukutar/Metadata"
@@ -210,7 +214,7 @@ class MergeMetadataNode:
     FUNCTION = "merge"
 
     def merge(self, **kwargs: Any) -> tuple[dict[str, str]]:
-        '''Sort the incoming metadata kwargs and merge them.
+        '''Sort the incoming metadata kwargs and smart-merge them.
 
         Args:
             **kwargs: Metadata block inputs arriving as ``meta_N`` keys.
@@ -220,5 +224,5 @@ class MergeMetadataNode:
         '''
         ordered = sort_meta_inputs(kwargs)
         blocks = [kwargs[key] for key in ordered if kwargs[key] is not None]
-        result = merge_metadata(*blocks)
+        result = merge_metadata_smart(*blocks)
         return (result,)

@@ -6,7 +6,8 @@ Date:   2026-11-02
 Version: v0.1.0
 
 Tests core.metadata functions: build_metadata, merge_metadata,
-standard_metadata, sort_meta_inputs.
+merge_metadata_smart, standard_metadata, sort_meta_inputs, plus the
+MergeMetadataNode pass-through.
 '''
 
 from __future__ import annotations
@@ -17,9 +18,11 @@ from unittest.mock import patch
 from comfyui_lukutar_nodes.core.metadata import (
     build_metadata,
     merge_metadata,
+    merge_metadata_smart,
     sort_meta_inputs,
     standard_metadata,
 )
+from comfyui_lukutar_nodes.nodes.metadata import MergeMetadataNode
 
 # ======================================================================
 # build_metadata
@@ -129,6 +132,198 @@ def test_merge_coerces_non_str_values() -> None:
     result = merge_metadata({"num": 42, "flt": 3.14})
     assert result["num"] == "42"
     assert result["flt"] == "3.14"
+
+
+# ======================================================================
+# merge_metadata_smart
+# ======================================================================
+
+
+def test_smart_merge_skips_none_blocks() -> None:
+    """None blocks are silently skipped."""
+    result = merge_metadata_smart(None, {"a": "1"}, None, {"b": "2"})
+    assert result == {"a": "1", "b": "2"}
+
+
+def test_smart_merge_distinct_names_stay_separate_blocks() -> None:
+    """Entries with unique names are appended as new blocks in order."""
+    result = merge_metadata_smart({"a": "1"}, {"b": "2"}, {"c": "3"})
+    assert result == {"a": "1", "b": "2", "c": "3"}
+    assert list(result.keys()) == ["a", "b", "c"]
+
+
+def test_smart_merge_same_name_single_line_comma_joined() -> None:
+    """Two single-line same-name blocks are comma-joined."""
+    result = merge_metadata_smart(
+        {"Lora hashes": "mawshot: 9ec5889be9"},
+        {"Lora hashes": "foxy: a8eae7b23d"},
+    )
+    assert result == {"Lora hashes": "mawshot: 9ec5889be9, foxy: a8eae7b23d"}
+
+
+def test_smart_merge_same_name_multiline_newline_joined() -> None:
+    """Same-name blocks join with a newline when either value is multiline."""
+    result = merge_metadata_smart(
+        {"prompt": "line one\nline two"},
+        {"prompt": "line three"},
+    )
+    assert result == {"prompt": "line one\nline two\nline three"}
+
+
+def test_smart_merge_folds_into_quoted_settings_entry() -> None:
+    """A name present in another block's settings line folds into that entry.
+
+    Regression case for the duplicated 'Lora hashes' block: the entry
+    already carries a quoted comma-containing value (A1111 style), and
+    the incoming data must be appended inside the quotes instead of
+    creating a second block.
+    """
+    parameters = (
+        "masterpiece, best quality\n"
+        "\n"
+        "Negative prompt: lowres, bad anatomy\n"
+        "\n"
+        "Model: novaKemonoXL_v80, Model hash: a643bf5963, "
+        'Lora hashes: "Mawshot (1).safetensors: 9ec5889be9", '
+        "Size: 1024 x 1536, Steps: 40"
+    )
+    result = merge_metadata_smart(
+        {"parameters": parameters},
+        {"Lora hashes": "Foxy_Beastly_Crimes_Illustrious: a8eae7b23d"},
+    )
+    assert list(result.keys()) == ["parameters"]
+    assert (
+        'Lora hashes: "Mawshot (1).safetensors: 9ec5889be9, '
+        'Foxy_Beastly_Crimes_Illustrious: a8eae7b23d"' in result["parameters"]
+    )
+    assert "Size: 1024 x 1536, Steps: 40" in result["parameters"]
+
+
+def test_smart_merge_fold_requotes_unquoted_entry_with_comma() -> None:
+    """Folding a comma into an unquoted entry re-quotes it A1111-style."""
+    result = merge_metadata_smart(
+        {"parameters": "prompt text\n\nSteps: 40, VAE: baked"},
+        {"VAE": "vae-ft-mse"},
+    )
+    assert list(result.keys()) == ["parameters"]
+    assert 'VAE: "baked, vae-ft-mse"' in result["parameters"]
+
+
+def test_smart_merge_creates_new_block_when_no_settings_entry() -> None:
+    """No same-name block and no settings entry → new block appended."""
+    result = merge_metadata_smart(
+        {"note": "hello world"},
+        {"Lora hashes": "mawshot: 9ec5889be9"},
+    )
+    assert result == {
+        "note": "hello world",
+        "Lora hashes": "mawshot: 9ec5889be9",
+    }
+
+
+def test_smart_merge_does_not_fold_into_non_settings_lines() -> None:
+    """Only the last line is treated as a settings line."""
+    result = merge_metadata_smart(
+        {"x": "Steps: 40\njust some text"},
+        {"Steps": "50"},
+    )
+    assert result == {"x": "Steps: 40\njust some text", "Steps": "50"}
+
+
+def test_smart_merge_skips_empty_names_and_values() -> None:
+    """Entries with blank names or blank values are skipped entirely."""
+    result = merge_metadata_smart({"a": "1"}, {"": "ignored"}, {"b": "   "})
+    assert result == {"a": "1"}
+
+
+def test_smart_merge_does_not_mutate_inputs() -> None:
+    """Input dicts are not modified by the smart merge."""
+    first = {"parameters": "p\n\nLora hashes: \"a: 111\""}
+    second = {"Lora hashes": "b: 222"}
+    merge_metadata_smart(first, second)
+    assert first == {"parameters": "p\n\nLora hashes: \"a: 111\""}
+    assert second == {"Lora hashes": "b: 222"}
+
+
+def test_smart_merge_coerces_non_str_values() -> None:
+    """Names and values are coerced via str() and stripped."""
+    result = merge_metadata_smart({42: 7}, {"a": 3.5})
+    assert result == {"42": "7", "a": "3.5"}
+
+
+def test_smart_merge_settings_line_only_block_folds() -> None:
+    """A block whose whole value is one settings line still folds."""
+    result = merge_metadata_smart(
+        {"Model": "ckpt"},
+        {"Lora hashes": "mawshot: 9ec5889be9"},
+    )
+    # 'Model: ckpt' has no 'Lora hashes' entry → new block.
+    assert result == {
+        "Model": "ckpt",
+        "Lora hashes": "mawshot: 9ec5889be9",
+    }
+
+    folded = merge_metadata_smart(
+        {"info": "Model: ckpt, Lora hashes: old: 111"},
+        {"Lora hashes": "new: 222"},
+    )
+    assert folded == {"info": "Model: ckpt, Lora hashes: \"old: 111, new: 222\""}
+
+
+def test_smart_merge_same_name_wins_over_settings_fold() -> None:
+    """Tier order: an existing same-name block absorbs data before any
+    settings-line folding happens for that name."""
+    result = merge_metadata_smart(
+        {"Lora hashes": "b: 222"},
+        {"parameters": "p\n\nLora hashes: \"a: 111\""},
+        {"Lora hashes": "c: 333"},
+    )
+    assert list(result.keys()) == ["Lora hashes", "parameters"]
+    assert result["Lora hashes"] == "b: 222, c: 333"
+    assert '"a: 111"' in result["parameters"]
+
+
+def test_smart_merge_folds_repeatedly_into_same_entry() -> None:
+    """Several same-name incoming blocks all fold into one entry."""
+    result = merge_metadata_smart(
+        {"parameters": "p\n\nLora hashes: \"a: 111\""},
+        {"Lora hashes": "b: 222"},
+        {"Lora hashes": "c: 333"},
+    )
+    assert list(result.keys()) == ["parameters"]
+    assert result["parameters"].endswith(
+        'Lora hashes: "a: 111, b: 222, c: 333"'
+    )
+
+
+# ======================================================================
+# MergeMetadataNode
+# ======================================================================
+
+
+def test_merge_node_delegates_to_smart_merge() -> None:
+    """The node folds settings entries instead of duplicating blocks."""
+    node = MergeMetadataNode()
+    parameters = (
+        "prompt text\n"
+        "\n"
+        "Negative prompt: lowres\n"
+        "\n"
+        'Model: ckpt, Lora hashes: "mawshot: 9ec5889be9", Steps: 40'
+    )
+    result, = node.merge(meta_1={"parameters": parameters},
+                         meta_2={"Lora hashes": "foxy: a8eae7b23d"})
+    assert list(result.keys()) == ["parameters"]
+    assert "foxy: a8eae7b23d" in result["parameters"]
+
+
+def test_merge_node_returns_fresh_dict() -> None:
+    """Each call returns a new dict (not shared between calls)."""
+    node = MergeMetadataNode()
+    r1, = node.merge(meta_1={"a": "1"})
+    r2, = node.merge(meta_1={"b": "2"})
+    r1["a"] = "modified"
+    assert r2 == {"b": "2"}
 
 
 # ======================================================================

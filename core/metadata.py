@@ -15,6 +15,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
+from .a1111_parameters import quote_a1111
+
 logger = logging.getLogger(__name__)
 
 #: The ComfyUI socket type name shared by all metadata nodes.
@@ -97,6 +99,188 @@ def merge_metadata(
             continue
         for key, value in block.items():
             result[key] = str(value)
+    return result
+
+
+# ------------------------------------------------------------------ #
+# Smart merge: fold entries into existing block text                 #
+# ------------------------------------------------------------------ #
+
+
+def _join_values(existing: str, addition: str) -> str:
+    '''Join two metadata values belonging to the same block name.
+
+    Single-line values are comma-joined (matching A1111 list entries
+    such as ``Lora hashes``); when either side is multiline the values
+    are newline-joined instead.
+
+    Args:
+        existing: The accumulated value.
+        addition: The incoming value.
+
+    Returns:
+        The combined value string.
+    '''
+    if "\n" in existing or "\n" in addition:
+        return f"{existing}\n{addition}"
+    return f"{existing}, {addition}"
+
+
+def _split_top_level(line: str) -> list[str]:
+    '''Split an A1111 settings line on commas outside double quotes.
+
+    JSON-escaped characters (``\\"``) inside quoted segments are kept
+    verbatim and never treated as quote toggles.
+
+    Args:
+        line: The settings line to split.
+
+    Returns:
+        The raw comma-separated segments, whitespace untrimmed.
+    '''
+    parts: list[str] = []
+    buf: list[str] = []
+    in_quote = False
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if in_quote:
+            buf.append(ch)
+            if ch == "\\" and i + 1 < len(line):
+                buf.append(line[i + 1])
+                i += 1
+            elif ch == '"':
+                in_quote = False
+        elif ch == '"':
+            in_quote = True
+            buf.append(ch)
+        elif ch == ",":
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    parts.append("".join(buf))
+    return parts
+
+
+def _parse_settings_line(line: str) -> list[tuple[str, str]] | None:
+    '''Parse an A1111 settings line into ``(key, raw_value)`` entries.
+
+    Args:
+        line: Candidate settings line (values may be quoted).
+
+    Returns:
+        The entries with keys stripped and raw (possibly quoted)
+        values, or ``None`` when the line is not a settings line
+        (any segment lacking a ``": "`` separator or a non-empty key).
+    '''
+    entries: list[tuple[str, str]] = []
+    for part in _split_top_level(line):
+        key, sep, value = part.partition(": ")
+        key = key.strip()
+        if not sep or not key:
+            return None
+        entries.append((key, value.strip()))
+    return entries or None
+
+
+def _unquote_a1111(text: str) -> str:
+    '''Undo A1111 value quoting produced by :func:`quote_a1111`.
+
+    Args:
+        text: Raw entry value, optionally JSON-quoted.
+
+    Returns:
+        The unquoted value; a malformed quoted value falls back to
+        plain quote-stripping.
+    '''
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return text[1:-1]
+    return text
+
+
+def _fold_into_entry(value: str, key: str, addition: str) -> str | None:
+    '''Fold *addition* into a named entry of *value*'s settings line.
+
+    Only the **last** line of *value* is considered (the A1111 infotext
+    settings line). When it parses as ``"Key: value, ..."`` entries and
+    one of them is named *key*, the addition is appended to that
+    entry's value (comma-joined) and the entry is re-quoted with
+    :func:`quote_a1111`.
+
+    Args:
+        value: The existing block text.
+        key: The entry name to fold into.
+        addition: The incoming data (already stripped).
+
+    Returns:
+        The rewritten block text, or ``None`` when *value* has no
+        settings line or no entry named *key*.
+    '''
+    lines = value.split("\n")
+    entries = _parse_settings_line(lines[-1])
+    if not entries:
+        return None
+    for idx, (entry_key, entry_value) in enumerate(entries):
+        if entry_key != key:
+            continue
+        merged = f"{_unquote_a1111(entry_value)}, {addition}"
+        entries[idx] = (entry_key, quote_a1111(merged))
+        lines[-1] = ", ".join(f"{k}: {v}" for k, v in entries)
+        return "\n".join(lines)
+    return None
+
+
+def merge_metadata_smart(
+    *blocks: Mapping[str, Any] | None,
+) -> dict[str, str]:
+    '''Merge metadata blocks without duplicating existing data.
+
+    Blocks are processed in argument order, skipping ``None``. For
+    every entry (empty names/values are skipped) the resolution is:
+
+    #. **Same-name block** — the entry's name already exists in the
+       result: the values are joined (comma for single-line values,
+       newline when either side is multiline).
+    #. **Settings-line fold** — the name appears as a ``"Key: value"``
+       entry inside another block's *last* line (the A1111 infotext
+       settings line, e.g. ``"Lora hashes"`` inside ``"parameters"``):
+       the data is folded into that entry, honouring A1111 quoting, so
+       no separate block is created.
+    #. **New block** — otherwise a fresh block is appended.
+
+    Args:
+        *blocks: One or more ``Mapping[str, Any]`` (or ``None``).
+
+    Returns:
+        A fresh insertion-ordered ``dict[str, str]``; input mappings
+        are never mutated.
+    '''
+    result: dict[str, str] = {}
+    for block in blocks:
+        if block is None:
+            continue
+        for key, value in block.items():
+            name = str(key).strip()
+            text = str(value).strip()
+            if not name or not text:
+                continue
+            if name in result:
+                result[name] = _join_values(result[name], text)
+                continue
+            folded = False
+            for existing_key, existing_value in result.items():
+                merged_value = _fold_into_entry(existing_value, name, text)
+                if merged_value is not None:
+                    result[existing_key] = merged_value
+                    folded = True
+                    break
+            if not folded:
+                result[name] = text
     return result
 
 

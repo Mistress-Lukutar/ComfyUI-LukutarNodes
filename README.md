@@ -53,7 +53,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **Standard Metadata** — emit workflow / prompt / datetime entries as
   a LUKUTAR_METADATA dict (`Lukutar/Metadata`).
 - **Merge Metadata** — merge several LUKUTAR_METADATA blocks into one
-  via dynamic SEGS-Concat-style inputs
+  without duplicates (same-name blocks join; names matching an A1111
+  settings entry fold into that block's text) via dynamic
+  SEGS-Concat-style inputs
   (`Lukutar/Metadata`).
 - **A1111 Parameters** — assemble an A1111-style `parameters` infotext
   from positive/negative prompts, version, and metadata-block settings
@@ -1115,8 +1117,8 @@ off (or whose hidden input is missing) are omitted entirely.
 
 ### Merge Metadata
 
-Merges several LUKUTAR_METADATA blocks into one, with duplicate keys
-resolved **later-wins** (blocks processed in slot-number order)
+Merges several LUKUTAR_METADATA blocks into one **without duplicating
+existing data** (blocks processed in slot-number order)
 (`Lukutar/Metadata`). The backend declares zero inputs; slots are grown
 client-side by `web/js/metadata_merge.js` using the same SEGS-Concat /
 Set-Bundle growth mechanism.
@@ -1135,14 +1137,27 @@ None — all inputs are dynamic.
 
 | Name | Type | Description |
 |------|------|-------------|
-| metadata | LUKUTAR_METADATA | Merged dict; blocks processed in `meta_1`, `meta_2`, … order, later keys overriding earlier ones. |
+| metadata | LUKUTAR_METADATA | Merged dict; blocks processed in `meta_1`, `meta_2`, … order, entries resolved per the smart-merge rules below. |
 
 #### Behaviour
 
 - Slots are named `meta_1`, `meta_2`, … (up to 16). The backend sorts
   incoming kwargs by natural `meta_N` order and merges sequentially.
-- `None` inputs are skipped during merge. All values are coerced via
-  `str()`.
+- Every incoming entry (blank names/values are skipped) is resolved by
+  three tiers, in order:
+  1. **Same-name block** — the name already exists in the result: the
+     values are joined (comma for single-line values, newline when
+     either side is multiline). Two `Lora hashes` blocks therefore
+     become one combined block.
+  2. **Settings-line fold** — the name appears as a `"Key: value"`
+     entry inside another block's *last* line (the A1111 infotext
+     settings line). The data is folded into that entry with A1111
+     quoting honoured (values containing commas are quoted), so e.g. a
+     `Lora hashes` block merges into the `parameters` block's
+     `Lora hashes: "…"` entry instead of becoming a separate block.
+  3. **New block** — otherwise the entry is appended as a new block.
+- `None` inputs are skipped during merge. All names/values are coerced
+  via `str()` and stripped; input mappings are never mutated.
 - Without the web extension the node is not wirable from the canvas
   (same trade-off as Set/Get Bundle). Hand-written API prompts may pass
   `meta_1`, `meta_2`, … links, which the backend orders by natural
@@ -1320,9 +1335,10 @@ byte-compatible with A1111's own parser.
   real slots are active the node returns empty outputs without touching
   `folder_paths`.
 - **Why not multiple Model Info nodes?** Each A1111 Model Info emits a
-  `"Lora hashes"` key, and **Merge Metadata** resolves duplicate keys
-  by later-wins — so wiring two Model Info nodes would clobber the first
-  node's entry. This node aggregates all hashes into a single raw value
+  `"Lora hashes"` key, and **Merge Metadata** folds duplicate names
+  together — so wiring two Model Info nodes would append the second
+  node's hash to the first node's entry. This node aggregates all
+  hashes into a single raw value
   in a single metadata block (A1111 quoting is applied once by the
   **A1111 Parameters** node), avoiding that conflict entirely.
 - **Runtime requirement.** The node raises a `RuntimeError` when called
