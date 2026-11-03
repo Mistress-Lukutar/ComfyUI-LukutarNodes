@@ -70,8 +70,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
 - **A1111 Lora Hashes** — hash up to eight LoRA files and emit a single
   `"Lora hashes"` entry in A1111 format
   (`Lukutar/Metadata`).
-- **Paste (Clipspace, Keep Mask)** — context-menu item for image upload
-  nodes: paste a clipspace image while keeping the node's painted mask
+- **Paste (Clipspace, Keep Mask)** / **Paste Image (Keep Mask)** —
+  context-menu items for image upload nodes: paste a clipspace image
+  or a clipboard image while keeping the node's painted mask
   (frontend extension, no node).
 
 ### Color Match (Frequency Split)
@@ -1119,29 +1120,51 @@ byte-compatible with A1111's own parser.
   every unclaimed slot and shows exactly one free trailing combo, so the
   user can keep adding LoRA inputs without seeing eight blank dropdowns.
 
-### Paste (Clipspace, Keep Mask)
+### Paste (Clipspace, Keep Mask) / Paste Image (Keep Mask)
 
-Not a node — a context-menu item the pack's web extension adds to
+Not nodes — two context-menu items the pack's web extension adds to
 image-upload nodes (`Load Image`, `Load Image (impact)`, anything with
 an `image_upload` input).
 
 ComfyUI stores a painted mask in the **alpha channel of the very file**
-the image widget points at; the stock `Paste (Clipspace)` swaps the
-file, and the mask dies with it. This item pastes the clipspace's
-selected image but re-bakes the current file's alpha (i.e. the mask)
-on top of it, uploading the combined PNG as a new input file — the
-same save flow the MaskEditor uses.
+the image widget points at; the stock pastes swap the file —
+`Paste (Clipspace)` points the widget at the clipspace file, and the
+Nodes-2.0 `Paste Image` uploads the clipboard image — so the mask dies
+with it. These items paste the new image but re-bake the current
+file's alpha (i.e. the mask) on top of it, uploading the combined PNG
+as a new input file — the same save flow the MaskEditor uses.
+
+Two items:
+
+- **Paste (Clipspace, Keep Mask)** — pastes the clipspace's selected
+  image, ignoring `img_paste_mode`; the keep-mask sibling of the stock
+  `Paste (Clipspace)`.
+- **Paste Image (Keep Mask)** — pastes the first image on the system
+  clipboard; the keep-mask sibling of the Nodes-2.0 `Paste Image`
+  (which is what the new frontend's paste flow is built on). Works on
+  the legacy frontend too.
 
 #### Behaviour
 
-- The item appears in the node's context menu whenever the clipspace
-  holds an image. On the current ComfyUI frontend it sits in the
-  **Extensions** section at the bottom of the menu (next to other
-  packs' items); on the legacy frontend, directly in the node menu.
+- On the Vue-based Nodes-2.0 menu both items sit in the **Extensions**
+  section at the bottom of the menu (next to other packs' items); on
+  the legacy frontend, directly in the node menu. The media section
+  with icons (`Paste Image` & co.) is built Vue-side and cannot be
+  extended by third-party packs.
+- **Paste (Clipspace, Keep Mask)** appears whenever the clipspace
+  holds anything pasteable: its selected image, or — recent frontends
+  only copy node *outputs* into `clipspace.images`, which input nodes
+  without a run don't have — the snapshotted image widget value,
+  exactly what the stock `Paste (Clipspace)` restores.
+- **Paste Image (Keep Mask)** is always offered on image-upload nodes,
+  like the stock `Paste Image`; it no-ops with a console note when the
+  clipboard holds no image.
 - If the sizes differ, the mask is stretched to the new image's
   dimensions.
 - If the current file has no mask (no alpha / fully opaque), the item
-  degrades to an ordinary clipspace paste — nothing is uploaded.
+  degrades to an ordinary paste — the clipspace item just points the
+  widget at the clipspace reference and nothing is uploaded; the
+  clipboard item uploads the pasted image as-is.
 - The pasted image's own alpha (if any) is discarded; only the node's
   existing mask is kept.
 - The combined PNG is encoded straight from the RGBA buffer, so RGB

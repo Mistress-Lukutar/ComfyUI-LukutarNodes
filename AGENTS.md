@@ -97,9 +97,12 @@ the README in sync with any behavior change.
   `__init__.py` (rich highlighted input + popup editor for Prompt
   Annotate; invisible Set/Get Variable auto-connection; Set/Get Bundle
   slot growth + invisible per-slot links; Group Switch
-  dynamic group rows; "Paste (Clipspace, Keep Mask)" context-menu item
-  that re-bakes the current file's alpha-mask onto a pasted clipspace
-  image, see README; `save_image.js` hides/shows the metadata socket on
+  dynamic group rows; "Paste (Clipspace, Keep Mask)" / "Paste Image
+  (Keep Mask)" context-menu items that re-bake the current file's
+  alpha-mask onto a pasted clipspace/clipboard image (work on both the
+  legacy and the Nodes-2.0 Vue menu — via `getExtraMenuOptions`, which
+  the v2 menu converts into its "Extensions" section), see README;
+  `save_image.js` hides/shows the metadata socket on
   format change; `metadata_blocks.js` collapses name/value pairs beyond
   `num_blocks`; `metadata_merge.js` grows/collapses `meta_N` inputs).
   Vanilla ES modules, no build step; the pack must stay fully functional

@@ -1,40 +1,57 @@
 /**
  * File:   paste_keep_mask.js
- * Brief:  "Paste (Clipspace, Keep Mask)" context-menu item for image
- *         upload nodes (Load Image & friends): paste the clipspace
- *         image into the widget but keep the mask already stored in
- *         the current file's alpha channel.
+ * Brief:  "Paste (Clipspace, Keep Mask)" and "Paste Image (Keep Mask)"
+ *         context-menu items for image upload nodes (Load Image &
+ *         friends): paste a new image into the widget but keep the mask
+ *         already stored in the current file's alpha channel.
  * Author: Mistress-Lukutar
- * Date:   2026-08-30
- * Version: v0.11.0
+ * Date:   2026-11-03
+ * Version: v0.13.0
  *
  * ComfyUI has no separate mask storage: the MaskEditor bakes the
  * painted mask into the ALPHA CHANNEL of the file the image widget
  * points at (alpha = 255 - painted), and LoadImage reads its MASK
- * output back from that alpha. The stock "Paste (Clipspace)" merely
- * points the widget at the clipspace file, so the old mask dies with
- * the old file. This item downloads the current file, lifts its
- * alpha, re-bakes it on top of the pasted image (stretched if the
- * sizes differ) and uploads the result as a new input file — the same
+ * output back from that alpha. The stock pastes merely replace the
+ * file — clipspace paste points the widget at the clipspace file, and
+ * the Nodes-2.0 "Paste Image" uploads the clipboard image — so the old
+ * mask dies with the old file. These items download the current file,
+ * lift its alpha, re-bake it on top of the new image (stretched if the
+ * sizes differ) and upload the result as a new input file — the same
  * flow the MaskEditor itself uses on save.
  *
+ * Two items:
+ * - "Paste (Clipspace, Keep Mask)" pastes the clipspace's SELECTED
+ *   image, ignoring img_paste_mode — the keep-mask sibling of the
+ *   stock "Paste (Clipspace)".
+ * - "Paste Image (Keep Mask)" pastes the first image on the system
+ *   clipboard — the keep-mask sibling of the Nodes-2.0 "Paste Image"
+ *   (which is what the new frontend's paste flow is built on). Works
+ *   on the legacy frontend too.
+ *
  * If the current file carries no mask at all (no alpha, or alpha
- * fully opaque) the item degrades to an ordinary clipspace paste:
- * the widget just gets the clipspace reference and nothing is
- * uploaded. Always pastes the clipspace's SELECTED image, ignoring
- * img_paste_mode.
+ * fully opaque) the item degrades to an ordinary paste: the clipspace
+ * item just points the widget at the clipspace reference and nothing
+ * is uploaded; the clipboard item uploads the pasted image as-is.
  *
  * The combined PNG is encoded from the raw RGBA buffer instead of
  * canvas.toBlob because canvases store pixels premultiplied: toBlob
  * would zero the RGB under every masked (transparent) pixel. Mirrors
  * the frontend's own encodeRgbaAsPng (utils/pngEncodeUtil.ts).
  *
- * Menu placement: added via getExtraMenuOptions, so on the current
- * ComfyUI frontend the item lands in the "Extensions" section at the
- * bottom of the node context menu; on the legacy frontend it appears
- * directly in the node menu. Pure convenience — with the extension
- * disabled everything keeps working and the stock paste behaviour is
- * unchanged.
+ * Menu placement: both items are added via getExtraMenuOptions, which
+ * BOTH frontends honour — the legacy one renders them directly in the
+ * node menu, the Vue-based Nodes-2.0 menu converts them into its
+ * "Extensions" section (like other packs' items). The media section
+ * with icons ("Paste Image" & co.) is not extensible — those items
+ * are built Vue-side and tagged through an internal WeakMap no
+ * extension can reach — hence the Extensions placement. Items appear
+ * whenever the clip source can be resolved: the clipspace item needs
+ * a clipspace image (clipspace.images, or the snapshotted image
+ * widget value — recent frontends only copy node OUTPUTS into
+ * clipspace.images, which input nodes often don't have), the
+ * clipboard item is always offered on image-upload nodes. Pure
+ * convenience — with the extension disabled everything keeps working
+ * and the stock paste behaviour is unchanged.
  *
  * Served at /extensions/<pack>/js/paste_keep_mask.js, hence the THREE
  * parent hops to reach /scripts/app.js.
@@ -44,8 +61,9 @@ import { app, ComfyApp } from "../../../scripts/app.js";
 
 console.info("[LukutarNodes] paste-keep-mask extension loaded");
 
-/** Context-menu label, in the stock "Paste (Clipspace)" naming style. */
-const MENU_LABEL = "Paste (Clipspace, Keep Mask)";
+/** Context-menu labels, in the stock paste items' naming style. */
+const CLIPSPACE_LABEL = "Paste (Clipspace, Keep Mask)";
+const CLIPBOARD_LABEL = "Paste Image (Keep Mask)";
 /** Prefix for the uploaded combined file (MaskEditor uses clipspace-*). */
 const FILE_PREFIX = "clipspace-paste-keep-mask-";
 /** One shared encoder for PNG chunk type bytes. */
@@ -285,66 +303,164 @@ function applyImageToWidget(node, widget, ref) {
   app.canvas.setDirty(true);
 }
 
+/** Surface a failure as a toast (Nodes-2.0) plus the console. */
+function reportError(message, error) {
+  console.error("[LukutarNodes] " + message, error);
+  app.extensionManager?.toast?.addAlert?.(message + ": " + error);
+}
+
+/**
+ * Download the widget's current file, lift its alpha (the painted
+ * mask), re-bake it over `newBitmap`'s pixels and upload the combined
+ * PNG. Returns the uploaded file's reference, or null when the
+ * current file carries no mask (the caller then pastes plainly).
+ */
+async function bakeMaskAndUpload(node, widget, newBitmap) {
+  const width = newBitmap.width;
+  const height = newBitmap.height;
+
+  // Old alpha (the mask), stretched to the new image's dimensions.
+  let oldAlpha = null;
+  const currentRef = parseWidgetFileRef(widget.value);
+  if (currentRef) {
+    try {
+      const oldBitmap = await fetchAsBitmap(currentRef);
+      const oldPixels = drawToImageData(oldBitmap, width, height);
+      if (hasMask(oldPixels)) {
+        oldAlpha = oldPixels.data;
+      }
+    } catch (error) {
+      console.warn(
+        "[LukutarNodes] paste-keep-mask: current image unavailable, " +
+          "pasting without mask:",
+        error
+      );
+    }
+  }
+
+  if (!oldAlpha) {
+    return null;
+  }
+
+  // New RGB + old alpha, encoded straight (no premultiplication).
+  const newPixels = drawToImageData(newBitmap, width, height);
+  const merged = new Uint8ClampedArray(newPixels.data);
+  for (let i = 3; i < merged.length; i += 4) {
+    merged[i] = oldAlpha[i];
+  }
+
+  const blob = await encodeRgbaAsPng({ width, height, data: merged });
+  const ref = await uploadImage(blob);
+  applyImageToWidget(node, widget, ref);
+  return ref;
+}
+
 /**
  * Paste the clipspace image into the widget, keeping the current
  * file's alpha (the painted mask). Falls back to a plain paste when
  * there is no mask to keep.
  */
-async function pasteKeepMask(node, widget) {
-  const clipspace = ComfyApp.clipspace;
-  const images = clipspace?.images;
-  if (!images?.length) {
-    return;
-  }
-  const index = Math.min(Math.max(clipspace.selectedIndex ?? 0, 0), images.length - 1);
-  const clipRef = images[index];
-
+async function pasteKeepMask(node, widget, clipRef) {
   try {
     const newBitmap = await fetchAsBitmap(clipRef);
-    const width = newBitmap.width;
-    const height = newBitmap.height;
-
-    // Old alpha (the mask), stretched to the new image's dimensions.
-    let oldAlpha = null;
-    const currentRef = parseWidgetFileRef(widget.value);
-    if (currentRef) {
-      try {
-        const oldBitmap = await fetchAsBitmap(currentRef);
-        const oldPixels = drawToImageData(oldBitmap, width, height);
-        if (hasMask(oldPixels)) {
-          oldAlpha = oldPixels.data;
-        }
-      } catch (error) {
-        console.warn(
-          "[LukutarNodes] paste-keep-mask: current image unavailable, " +
-            "pasting without mask:",
-          error
-        );
-      }
-    }
-
-    if (!oldAlpha) {
+    if (!(await bakeMaskAndUpload(node, widget, newBitmap))) {
       // Nothing to keep — behave like the stock paste.
       applyImageToWidget(node, widget, clipRef);
+    }
+  } catch (error) {
+    reportError(CLIPSPACE_LABEL + " failed", error);
+  }
+}
+
+/**
+ * First image bitmap on the system clipboard, or null when the
+ * clipboard holds no image (Permissions/Focus errors propagate).
+ */
+async function readClipboardBitmap() {
+  const items = await navigator.clipboard.read();
+  for (const item of items) {
+    const imageType = item.types.find((type) => type.startsWith("image/"));
+    if (!imageType) {
+      continue;
+    }
+    const blob = await item.getType(imageType);
+    return createImageBitmap(blob);
+  }
+  return null;
+}
+
+/**
+ * Paste the clipboard image into the widget, keeping the current
+ * file's alpha (the painted mask). The Nodes-2.0 menu's own
+ * "Paste Image" is the no-mask sibling of this item. Falls back to
+ * uploading the pasted image as-is when there is no mask to keep.
+ */
+async function pasteClipboardKeepMask(node, widget) {
+  try {
+    const newBitmap = await readClipboardBitmap();
+    if (!newBitmap) {
+      console.info("[LukutarNodes] paste-keep-mask: no image on clipboard");
       return;
     }
-
-    // New RGB + old alpha, encoded straight (no premultiplication).
-    const newPixels = drawToImageData(newBitmap, width, height);
-    const merged = new Uint8ClampedArray(newPixels.data);
-    for (let i = 3; i < merged.length; i += 4) {
-      merged[i] = oldAlpha[i];
+    if (!(await bakeMaskAndUpload(node, widget, newBitmap))) {
+      // Nothing to keep — behave like the stock clipboard paste:
+      // upload the image itself and point the widget at it.
+      const pixels = drawToImageData(
+        newBitmap,
+        newBitmap.width,
+        newBitmap.height
+      );
+      const blob = await encodeRgbaAsPng({
+        width: newBitmap.width,
+        height: newBitmap.height,
+        data: pixels.data,
+      });
+      const ref = await uploadImage(blob);
+      applyImageToWidget(node, widget, ref);
     }
-
-    const blob = await encodeRgbaAsPng({ width, height, data: merged });
-    const ref = await uploadImage(blob);
-    applyImageToWidget(node, widget, ref);
   } catch (error) {
-    console.error("[LukutarNodes] paste-keep-mask failed:", error);
-    app.extensionManager?.toast?.addAlert?.(
-      "Paste (Clipspace, Keep Mask) failed: " + error
-    );
+    reportError(CLIPBOARD_LABEL + " failed", error);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Clip-source resolution                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The frontend's clipspace. Always reached through ComfyApp: the
+ * legacy frontends keep it as a plain property, the Vue-based ones
+ * as a static getter onto the new clipspace module — both are read
+ * the same way from an extension.
+ */
+function resolveClipspace() {
+  return ComfyApp.clipspace ?? null;
+}
+
+/**
+ * The file reference a clipspace paste would apply to this node's
+ * image widget: the clipspace's selected image, or — when the
+ * clipspace holds no images (recent frontends copy node OUTPUTS
+ * there, which input nodes without a run don't have) — the
+ * snapshotted image widget value, exactly what the stock
+ * "Paste (Clipspace)" restores. Null when nothing is pasteable.
+ */
+function resolveClipRef(clipspace, inputNames) {
+  if (!clipspace) {
+    return null;
+  }
+  const images = clipspace.images;
+  if (images?.length) {
+    const index = Math.min(
+      Math.max(clipspace.selectedIndex ?? 0, 0),
+      images.length - 1
+    );
+    return images[index];
+  }
+  const widgetSnapshot = clipspace.widgets?.find((w) =>
+    inputNames.includes(w.name)
+  );
+  return widgetSnapshot ? parseWidgetFileRef(widgetSnapshot.value) : null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -387,18 +503,35 @@ app.registerExtension({
     const original = nodeType.prototype.getExtraMenuOptions;
     nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
       const result = original?.apply(this, arguments);
-      if (ComfyApp.clipspace?.images?.length) {
-        const widget = findImageWidget(this, inputNames);
-        if (widget) {
-          const node = this;
-          options.push({
-            content: MENU_LABEL,
-            callback: () => {
-              void pasteKeepMask(node, widget);
-            },
-          });
-        }
+      const widget = findImageWidget(this, inputNames);
+      if (!widget) {
+        return result;
       }
+      const node = this;
+
+      // The keep-mask sibling of the stock "Paste (Clipspace)": shown
+      // whenever the clipspace holds anything pasteable (the same
+      // condition the stock item uses, relaxed to widget values).
+      const clipRef = resolveClipRef(resolveClipspace(), inputNames);
+      if (clipRef) {
+        options.push({
+          content: CLIPSPACE_LABEL,
+          callback: () => {
+            void pasteKeepMask(node, widget, clipRef);
+          },
+        });
+      }
+
+      // The keep-mask sibling of the Nodes-2.0 "Paste Image" (the new
+      // frontend's paste flow): offered on every image-upload node,
+      // in both menus, exactly like the stock item.
+      options.push({
+        content: CLIPBOARD_LABEL,
+        callback: () => {
+          void pasteClipboardKeepMask(node, widget);
+        },
+      });
+
       return result;
     };
   },
