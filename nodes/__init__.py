@@ -16,6 +16,16 @@ from .a1111 import (
     A1111SamplingNode,
 )
 from .bundle_variables import GetBundleNode, SetBundleNode
+from .checkpoint_bundle import (
+    BundleKSamplerNode,
+    CheckpointBundleLoaderNode,
+    CheckpointBundlePackNode,
+    CheckpointBundleUnpackNode,
+    InfoPackNode,
+    InfoToA1111Node,
+    InfoUnpackNode,
+    LoraListNode,
+)
 from .color_match import ColorMatchNode
 from .group_switch import GroupSwitchNode
 from .metadata import (
@@ -36,16 +46,6 @@ from .save_image_jxl import SaveImageJxlNode
 from .seed_history import SeedHistoryNode
 from .segs_overlay import SegsOverlayNode
 from .segs_set_crop_size import SegsSetCropSizeNode
-from .t2i import (
-    T2IBundlePackNode,
-    T2IBundleUnpackNode,
-    T2IInfoPackNode,
-    T2IInfoToA1111Node,
-    T2IInfoUnpackNode,
-    T2ILoaderNode,
-    T2ILoraListNode,
-    T2ISamplerNode,
-)
 from .variables import GetVariableNode, SetVariableNode
 
 NODE_CLASS_MAPPINGS: dict[str, type] = {
@@ -64,14 +64,14 @@ NODE_CLASS_MAPPINGS: dict[str, type] = {
     "SeedHistory": SeedHistoryNode,
     "SetVariable": SetVariableNode,
     "GetVariable": GetVariableNode,
-    "T2ILoader": T2ILoaderNode,
-    "T2ILoraList": T2ILoraListNode,
-    "T2ISampler": T2ISamplerNode,
-    "T2IInfoToA1111": T2IInfoToA1111Node,
-    "T2IInfoUnpack": T2IInfoUnpackNode,
-    "T2IInfoPack": T2IInfoPackNode,
-    "T2IBundleUnpack": T2IBundleUnpackNode,
-    "T2IBundlePack": T2IBundlePackNode,
+    "CheckpointBundleLoader": CheckpointBundleLoaderNode,
+    "LoraList": LoraListNode,
+    "BundleKSampler": BundleKSamplerNode,
+    "InfoToA1111": InfoToA1111Node,
+    "InfoUnpack": InfoUnpackNode,
+    "InfoPack": InfoPackNode,
+    "CheckpointBundleUnpack": CheckpointBundleUnpackNode,
+    "CheckpointBundlePack": CheckpointBundlePackNode,
     "LukutarSaveImage": SaveImageNode,
     "LukutarSaveImageJxl": SaveImageJxlNode,
     "MetadataBlocks": MetadataBlocksNode,
@@ -100,14 +100,14 @@ NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
     "SeedHistory": "Seed History",
     "SetVariable": "Set Variable",
     "GetVariable": "Get Variable",
-    "T2ILoader": "T2I Loader",
-    "T2ILoraList": "T2I LoRA List",
-    "T2ISampler": "T2I Sampler",
-    "T2IInfoToA1111": "Info to A1111 Parameters",
-    "T2IInfoUnpack": "T2I Info Unpack",
-    "T2IInfoPack": "T2I Info Pack",
-    "T2IBundleUnpack": "T2I Bundle Unpack",
-    "T2IBundlePack": "T2I Bundle Pack",
+    "CheckpointBundleLoader": "Load Checkpoint (Bundle)",
+    "LoraList": "LoRA List",
+    "BundleKSampler": "KSampler (Bundle)",
+    "InfoToA1111": "Info to A1111 Parameters",
+    "InfoUnpack": "Info Unpack",
+    "InfoPack": "Info Pack",
+    "CheckpointBundleUnpack": "Checkpoint Bundle Unpack",
+    "CheckpointBundlePack": "Checkpoint Bundle Pack",
     "LukutarSaveImage": "Save Image (Metadata)",
     "LukutarSaveImageJxl": "Save Image JXL",
     "A1111HiresFix": "A1111 Hires Fix",
@@ -146,14 +146,14 @@ __all__ = [
     "SegsSetCropSizeNode",
     "SetVariableNode",
     "StandardMetadataNode",
-    "T2IBundlePackNode",
-    "T2IBundleUnpackNode",
-    "T2ILoaderNode",
-    "T2ILoraListNode",
-    "T2IInfoPackNode",
-    "T2IInfoToA1111Node",
-    "T2IInfoUnpackNode",
-    "T2ISamplerNode",
+    "CheckpointBundlePackNode",
+    "CheckpointBundleUnpackNode",
+    "CheckpointBundleLoaderNode",
+    "LoraListNode",
+    "InfoPackNode",
+    "InfoToA1111Node",
+    "InfoUnpackNode",
+    "BundleKSamplerNode",
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
 ]

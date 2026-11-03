@@ -1,11 +1,12 @@
 '''
-File:   t2i.py
-Brief:  ComfyUI nodes for the T2I bundle pipeline (loader, LoRA list, utilities).
+File:   checkpoint_bundle.py
+Brief:  ComfyUI nodes for the checkpoint bundle pipeline (loader, KSampler,
+        LoRA list, info utilities).
 Author: Mistress-Lukutar
 Date:   2026-11-03
 Version: v0.1.0
 
-The T2I set threads two custom entities through the graph:
+The bundle set threads two custom entities through the graph:
 
 * ``LUKUTAR_BUNDLE`` — a dict carrying ``model``/``clip``/``vae``/
   ``pos_cond``/``neg_cond``/``latent``/``img``; produced by the loader,
@@ -15,7 +16,7 @@ The T2I set threads two custom entities through the graph:
   loader, extended by the sampler, converted to A1111 metadata later.
 
 The weighted prompt engine implements BNK-style token normalization
-(pure math in ``core/t2i_prompt.py``) and weight interpretations
+(pure math in ``core/weighted_prompt.py``) and weight interpretations
 (tensor math here) on top of ComfyUI's own CLIP tokenizer.
 '''
 
@@ -62,8 +63,7 @@ except ImportError:  # pragma: no cover - exercised only outside runtime
     Image = None  # type: ignore[assignment]
 
 from ..core.a1111_parameters import build_parameters, get_model_hash_cache
-from ..core.metadata import METADATA_TYPE
-from ..core.t2i_info import (
+from ..core.generation_info import (
     BATCH_KEY,
     CFG_KEY,
     CLIP_SKIP_KEY,
@@ -89,10 +89,11 @@ from ..core.t2i_info import (
     settings_pairs,
     with_sampling,
 )
-from ..core.t2i_info import (
+from ..core.generation_info import (
     get as get_info,
 )
-from ..core.t2i_prompt import (
+from ..core.metadata import METADATA_TYPE
+from ..core.weighted_prompt import (
     DEFAULT_TOKEN_NORMALIZATION,
     DEFAULT_W_MAX,
     DEFAULT_WEIGHT_INTERPRETATION,
@@ -109,7 +110,7 @@ logger = logging.getLogger(__name__)
 # Module constants                                                   #
 # ------------------------------------------------------------------ #
 
-#: The ComfyUI socket type name for the T2I generation bundle.
+#: The ComfyUI socket type name for the generation bundle.
 BUNDLE_TYPE: str = "LUKUTAR_BUNDLE"
 
 #: The ComfyUI socket type name for a weighted LoRA list.
@@ -126,7 +127,7 @@ BUNDLE_KEYS: tuple[str, ...] = (
     "img",
 )
 
-#: Maximum number of LoRA slots on the T2I LoRA List node.
+#: Maximum number of LoRA slots on the LoRA List node.
 MAX_LORA_SLOTS: int = 8
 
 #: Combo sentinel marking an unused LoRA slot.
@@ -451,9 +452,9 @@ def _interpret_key(
         encode_func: Callable from :func:`_make_encode_func`.
         token_rows: Tokenized prompt rows of ``(token, weight,
             word_id)``.
-        token_normalization: One of ``core.t2i_prompt.TOKEN_NORMALIZATION``.
+        token_normalization: One of ``core.weighted_prompt.TOKEN_NORMALIZATION``.
         weight_interpretation: One of
-            ``core.t2i_prompt.WEIGHT_INTERPRETATION``.
+            ``core.weighted_prompt.WEIGHT_INTERPRETATION``.
         w_max: Norm cap for the ``down_weight`` interpretation.
 
     Returns:
@@ -547,9 +548,9 @@ def advanced_encode(
         text: The prompt text (may use ComfyUI ``(text:weight)``
             syntax).
         token_normalization: One of
-            ``core.t2i_prompt.TOKEN_NORMALIZATION``.
+            ``core.weighted_prompt.TOKEN_NORMALIZATION``.
         weight_interpretation: One of
-            ``core.t2i_prompt.WEIGHT_INTERPRETATION``.
+            ``core.weighted_prompt.WEIGHT_INTERPRETATION``.
         w_max: Norm cap for the ``down_weight`` interpretation.
 
     Returns:
@@ -609,7 +610,7 @@ def advanced_encode(
 
     # Non-CLIP composition (e.g. Flux l + t5xxl): comfy native weights.
     logger.debug(
-        "T2I prompt engine: no l/g CLIP keys (%s); using comfy native "
+        "Weighted prompt engine: no l/g CLIP keys (%s); using comfy native "
         "weighting",
         sorted(tokenized.keys()),
     )
@@ -649,7 +650,7 @@ def encode_conditioning(
 
 
 def validate_bundle(bundle: Any) -> None:
-    '''Validate a T2I bundle entity.
+    '''Validate a LUKUTAR_BUNDLE entity.
 
     Args:
         bundle: The entity to check.
@@ -660,13 +661,13 @@ def validate_bundle(bundle: Any) -> None:
     '''
     if not isinstance(bundle, dict):
         raise RuntimeError(
-            "T2I bundle input is not a LUKUTAR_BUNDLE entity; connect a "
-            "T2I Loader or T2I Bundle Pack output."
+            "Bundle input is not a LUKUTAR_BUNDLE entity; connect a "
+            "Load Checkpoint (Bundle) or Checkpoint Bundle Pack output."
         )
     missing = [key for key in BUNDLE_KEYS if key not in bundle]
     if missing:
         raise RuntimeError(
-            "T2I bundle is missing key(s): " + ", ".join(missing)
+            "Bundle is missing key(s): " + ", ".join(missing)
         )
 
 
@@ -675,15 +676,15 @@ def validate_bundle(bundle: Any) -> None:
 # ======================================================================
 
 
-class T2ILoraListNode:
+class LoraListNode:
     '''Build a weighted LoRA list from dynamic combo slots.
 
     Mirrors the A1111 Lora Hashes interaction: slots beyond the first
-    free one stay hidden (managed by ``web/js/t2i_lora_list.js``).
+    free one stay hidden (managed by ``web/js/lora_list.js``).
     Zero-weight and unused entries are dropped by the backend.
     '''
 
-    CATEGORY = "Lukutar/T2I"
+    CATEGORY = "Lukutar/Bundle"
 
     @classmethod
     def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
@@ -716,7 +717,7 @@ class T2ILoraListNode:
     FUNCTION = "build"
     DESCRIPTION = (
         "Collect several LoRAs with weights into one list socket for "
-        "the T2I Loader."
+        "the Load Checkpoint (Bundle) node."
     )
 
     def build(self, **kwargs: Any) -> tuple[tuple[tuple[str, float], ...]]:
@@ -737,21 +738,21 @@ class T2ILoraListNode:
                 continue
             if weight == 0.0:
                 logger.info(
-                    "T2I LoRA List: skipping zero-weight LoRA %s", name
+                    "LoRA List: skipping zero-weight LoRA %s", name
                 )
                 continue
             entries.append((name, weight))
         return (tuple(entries),)
 
 
-class T2ILoaderNode:
-    '''Load a checkpoint (+ optional LoRAs) and build the T2I bundle.
+class CheckpointBundleLoaderNode:
+    '''Load a checkpoint (+ optional LoRAs) and build the bundle.
 
     Encodes positive/negative prompts with the weighted prompt engine,
     creates the empty latent and assembles the portable info entity.
     '''
 
-    CATEGORY = "Lukutar/T2I"
+    CATEGORY = "Lukutar/Bundle"
 
     def __init__(self) -> None:
         #: Per-instance LoRA file cache ``(path, state_dict, metadata)``.
@@ -851,7 +852,7 @@ class T2ILoaderNode:
                 "lora_list": (
                     LORA_LIST_TYPE,
                     {
-                        "tooltip": "Weighted LoRA list from the T2I LoRA "
+                        "tooltip": "Weighted LoRA list from the LoRA "
                         "List node."
                     },
                 ),
@@ -863,7 +864,7 @@ class T2ILoaderNode:
     FUNCTION = "load"
     DESCRIPTION = (
         "Loads a checkpoint with optional LoRAs, encodes both prompts "
-        "and emits the T2I bundle plus its textual info entity."
+        "and emits the bundle plus its textual info entity."
     )
 
     def _apply_loras(
@@ -948,7 +949,7 @@ class T2ILoaderNode:
             RuntimeError: When called outside the ComfyUI runtime.
         '''
         if folder_paths is None or torch is None:
-            raise RuntimeError("T2I Loader requires the ComfyUI runtime.")
+            raise RuntimeError("Load Checkpoint (Bundle) requires the ComfyUI runtime.")
 
         token_normalization, weight_interpretation = validate_options(
             token_normalization, weight_interpretation
@@ -966,7 +967,7 @@ class T2ILoaderNode:
         if clip is None:
             raise RuntimeError(
                 f"Checkpoint {ckpt_name!r} has no CLIP text encoder; "
-                "the T2I Loader needs a full checkpoint."
+                "the loader needs a full checkpoint."
             )
         if vae_model is None:
             raise RuntimeError(
@@ -1018,7 +1019,7 @@ class T2ILoaderNode:
         )
         if applied:
             logger.info(
-                "T2I Loader: applied LoRAs %s",
+                "Load Checkpoint (Bundle): applied LoRAs %s",
                 format_lora_entries(applied) or "-",
             )
 
@@ -1034,8 +1035,8 @@ class T2ILoaderNode:
         return (bundle, info)
 
 
-class T2ISamplerNode:
-    '''Sample the T2I bundle and emit the decoded preview.
+class BundleKSamplerNode:
+    '''Sample the bundle and emit the decoded preview.
 
     Works like the core KSampler on the bundle's model/conditionings/
     latent: the latent progress preview is shown by ComfyUI itself
@@ -1050,7 +1051,7 @@ class T2ISamplerNode:
     outputs.
     '''
 
-    CATEGORY = "Lukutar/T2I"
+    CATEGORY = "Lukutar/Bundle"
     OUTPUT_NODE = True
 
     @classmethod
@@ -1067,11 +1068,11 @@ class T2ISamplerNode:
             "required": {
                 "bundle": (
                     BUNDLE_TYPE,
-                    {"tooltip": "Bundle from the T2I Loader."},
+                    {"tooltip": "Bundle from the Load Checkpoint (Bundle) node."},
                 ),
                 "info": (
                     INFO_TYPE,
-                    {"tooltip": "Info entity from the T2I Loader."},
+                    {"tooltip": "Info entity from the Load Checkpoint (Bundle) node."},
                 ),
                 "seed": (
                     "INT",
@@ -1175,7 +1176,7 @@ class T2ISamplerNode:
                 the ComfyUI runtime.
         '''
         if folder_paths is None or torch is None or latent_preview is None:
-            raise RuntimeError("T2I Sampler requires the ComfyUI runtime.")
+            raise RuntimeError("KSampler (Bundle) requires the ComfyUI runtime.")
         validate_bundle(bundle)
 
         model = bundle["model"]
@@ -1263,8 +1264,8 @@ class T2ISamplerNode:
         return {"ui": {}, "result": (new_bundle, info_out)}
 
 
-class T2IInfoToA1111Node:
-    '''Convert a T2I info entity into an A1111 parameters block.
+class InfoToA1111Node:
+    '''Convert an info entity into an A1111 parameters block.
 
     Emits a single LUKUTAR_METADATA entry ``{"parameters": text}``
     where *text* is the A1111 infotext (prompt line, optional
@@ -1272,7 +1273,7 @@ class T2IInfoToA1111Node:
     the same engine as the A1111 node set.
     '''
 
-    CATEGORY = "Lukutar/T2I"
+    CATEGORY = "Lukutar/Info"
 
     @classmethod
     def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
@@ -1280,7 +1281,7 @@ class T2IInfoToA1111Node:
             "required": {
                 "info": (
                     INFO_TYPE,
-                    {"tooltip": "Info entity from the T2I pipeline."},
+                    {"tooltip": "Info entity from the bundle pipeline."},
                 ),
             }
         }
@@ -1289,7 +1290,7 @@ class T2IInfoToA1111Node:
     RETURN_NAMES = ("metadata",)
     FUNCTION = "convert"
     DESCRIPTION = (
-        "Converts the T2I info entity into the A1111 'parameters' "
+        "Converts the info entity into the A1111 'parameters' "
         "metadata block."
     )
 
@@ -1313,14 +1314,14 @@ class T2IInfoToA1111Node:
         return (metadata,)
 
 
-class T2IInfoUnpackNode:
-    '''Split a T2I info entity into named string outputs.
+class InfoUnpackNode:
+    '''Split the info entity into named string outputs.
 
     Missing entries yield empty strings. The ``metadata`` output is a
     copy of the whole mapping for direct LUKUTAR_METADATA consumers.
     '''
 
-    CATEGORY = "Lukutar/T2I"
+    CATEGORY = "Lukutar/Info"
 
     @classmethod
     def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
@@ -1328,7 +1329,7 @@ class T2IInfoUnpackNode:
             "required": {
                 "info": (
                     INFO_TYPE,
-                    {"tooltip": "Info entity from the T2I pipeline."},
+                    {"tooltip": "Info entity from the bundle pipeline."},
                 ),
             }
         }
@@ -1378,16 +1379,16 @@ class T2IInfoUnpackNode:
         return strings + (metadata,)
 
 
-class T2IInfoPackNode:
-    '''Assemble a T2I info entity from an optional base plus pairs.
+class InfoPackNode:
+    '''Assemble the info entity from an optional base plus pairs.
 
     Mirrors Merge Metadata: up to four key/value pairs are layered on
     top of an optional input info (later pairs win). Pairs with an
-    empty key are skipped; ``web/js/t2i_info_pack.js`` keeps only the
+    empty key are skipped; ``web/js/info_pack.js`` keeps only the
     claimed pairs plus one free row visible.
     '''
 
-    CATEGORY = "Lukutar/T2I"
+    CATEGORY = "Lukutar/Info"
 
     #: Number of editable key/value pairs.
     MAX_INFO_PAIRS: int = 4
@@ -1417,7 +1418,7 @@ class T2IInfoPackNode:
     RETURN_TYPES = (INFO_TYPE,)
     RETURN_NAMES = ("info",)
     FUNCTION = "pack"
-    DESCRIPTION = "Builds a T2I info entity from key/value pairs."
+    DESCRIPTION = "Builds an info entity from key/value pairs."
 
     def pack(self, **kwargs: Any) -> tuple[dict[str, str]]:
         '''Merge the base info and the key/value pairs.
@@ -1463,7 +1464,7 @@ def _push_final_preview(pbar: Any, images: Any) -> None:
             ("JPEG", pil_image, latent_preview.MAX_PREVIEW_RESOLUTION),
         )
     except Exception:  # noqa: BLE001 - preview must not kill sampling
-        logger.exception("T2I Sampler: final preview push failed")
+        logger.exception("KSampler (Bundle): final preview push failed")
 
 
 def comfy_utils_load_torch_file(path: str) -> tuple[Any, Any]:
@@ -1483,14 +1484,14 @@ def comfy_utils_load_torch_file(path: str) -> tuple[Any, Any]:
     )
 
 
-class T2IBundleUnpackNode:
-    '''Split a T2I bundle back into standard ComfyUI sockets.
+class CheckpointBundleUnpackNode:
+    '''Split the bundle back into standard ComfyUI sockets.
 
     The ``img`` output yields an empty ``(0, h, w, 3)`` tensor until a
     sampler with VAE decode fills the bundle image slot.
     '''
 
-    CATEGORY = "Lukutar/T2I"
+    CATEGORY = "Lukutar/Bundle"
 
     @classmethod
     def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
@@ -1498,7 +1499,8 @@ class T2IBundleUnpackNode:
             "required": {
                 "bundle": (
                     BUNDLE_TYPE,
-                    {"tooltip": "Bundle from the T2I Loader or Sampler."},
+                    {"tooltip": "Bundle from the Load Checkpoint "
+                     "(Bundle) or KSampler (Bundle) node."},
                 ),
             }
         }
@@ -1522,7 +1524,7 @@ class T2IBundleUnpackNode:
         "img",
     )
     FUNCTION = "unpack"
-    DESCRIPTION = "Unpacks the T2I bundle into its components."
+    DESCRIPTION = "Unpacks the bundle into its components."
 
     def unpack(
         self, bundle: Any
@@ -1565,10 +1567,10 @@ class T2IBundleUnpackNode:
         )
 
 
-class T2IBundlePackNode:
-    '''Assemble a T2I bundle from standard ComfyUI sockets.'''
+class CheckpointBundlePackNode:
+    '''Assemble the bundle from standard ComfyUI sockets.'''
 
-    CATEGORY = "Lukutar/T2I"
+    CATEGORY = "Lukutar/Bundle"
 
     @classmethod
     def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:
@@ -1598,7 +1600,7 @@ class T2IBundlePackNode:
     RETURN_TYPES = (BUNDLE_TYPE,)
     RETURN_NAMES = ("bundle",)
     FUNCTION = "pack"
-    DESCRIPTION = "Packs standard sockets into a T2I bundle."
+    DESCRIPTION = "Packs standard sockets into the bundle."
 
     def pack(
         self,
@@ -1641,14 +1643,14 @@ __all__ = [
     "BUNDLE_TYPE",
     "LORA_LIST_TYPE",
     "MAX_LORA_SLOTS",
-    "T2IBundlePackNode",
-    "T2IBundleUnpackNode",
-    "T2ILoaderNode",
-    "T2ILoraListNode",
-    "T2IInfoPackNode",
-    "T2IInfoToA1111Node",
-    "T2IInfoUnpackNode",
-    "T2ISamplerNode",
+    "CheckpointBundlePackNode",
+    "CheckpointBundleUnpackNode",
+    "CheckpointBundleLoaderNode",
+    "LoraListNode",
+    "InfoPackNode",
+    "InfoToA1111Node",
+    "InfoUnpackNode",
+    "BundleKSamplerNode",
     "advanced_encode",
     "encode_conditioning",
     "validate_bundle",

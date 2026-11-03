@@ -1,17 +1,17 @@
 '''
-File:   test_t2i_info.py
-Brief:  Unit tests for the T2I info primitives (torch-free).
+File:   test_generation_info.py
+Brief:  Unit tests for the generation-info primitives (torch-free).
 Author: Mistress-Lukutar
 Date:   2026-11-03
 Version: v0.1.0
 
-Tests core.t2i_info: formatters, build_loader_info, with_sampling,
+Tests core.generation_info: formatters, build_loader_info, with_sampling,
 get, settings_pairs.
 '''
 
 from __future__ import annotations
 
-from comfyui_lukutar_nodes.core.t2i_info import (
+from comfyui_lukutar_nodes.core.generation_info import (
     BATCH_KEY,
     CFG_KEY,
     DENOISE_KEY,

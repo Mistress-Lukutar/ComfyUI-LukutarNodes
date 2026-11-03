@@ -77,6 +77,19 @@ a zero-input seed generator with the same ``seed`` +
 	type change via `/models/<folder>`; `web/js/a1111_lora_hashes.js` hides unused
 	`lora_N` combos and shows one free trailing slot. Cache file is runtime-created and
 	gitignored (not tracked in the repo).
+The checkpoint-bundle set — `nodes/checkpoint_bundle.py` in categories
+	`Lukutar/Bundle` (Load Checkpoint, LoRA List, KSampler, Checkpoint
+	Bundle Pack/Unpack) and `Lukutar/Info` (Info Pack/Unpack, Info to
+	A1111), engines `core/weighted_prompt.py` (torch-free BNK-style token
+	normalization) + `core/generation_info.py` (LUKUTAR_INFO primitives,
+	A1111-compatible keys); thread the custom `LUKUTAR_BUNDLE`
+	(model/clip/vae/pos_cond/neg_cond/latent/img) and `LUKUTAR_INFO`
+	(ordered `dict[str, str]`) entities through the graph;
+	`web/js/lora_list.js` and `web/js/info_pack.js` hide unclaimed
+	`lora_N`/`key_N` slots (one free trailing pair); KSampler (Bundle) is
+	an OUTPUT_NODE that pushes the decoded first frame through the preview
+	channel (replaces the noise frame — fixes the v1 grey-preview and the
+	v2 duplicate-image display) and deliberately drops `executed` ui.images.
 The nodes' behavioral contract (inputs, batch semantics, auto-tune,
 progress reporting, markup grammar) is specified in `README.md`; keep
 the README in sync with any behavior change.
@@ -120,7 +133,10 @@ it in `nodes/__init__.py` (`NODE_CLASS_MAPPINGS` +
 for image nodes, `Lukutar/Prompt` for the prompt-annotation nodes,
 `Lukutar/Variables` for the variable pair, `Lukutar/Metadata` for the
 metadata trio, `Lukutar/Groups` for the Group Switch, `Lukutar/Seeds`
-for seed-related nodes.
+for seed-related nodes, `Lukutar/Bundle` for the checkpoint-bundle
+pipeline nodes (Load Checkpoint, LoRA List, KSampler, Bundle
+Pack/Unpack) and `Lukutar/Info` for the info-utility nodes (Info
+Pack/Unpack, Info to A1111).
 
 ## Commands
 

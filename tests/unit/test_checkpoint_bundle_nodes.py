@@ -1,38 +1,38 @@
 '''
-File:   test_t2i_nodes.py
-Brief:  Unit tests for the torch-free T2I node parts.
+File:   test_checkpoint_bundle_nodes.py
+Brief:  Unit tests for the torch-free checkpoint bundle node parts.
 Author: Mistress-Lukutar
 Date:   2026-11-03
 Version: v0.1.0
 
-nodes/t2i.py imports torch only through a guarded try, so the LoRA
+nodes/checkpoint_bundle.py imports torch only through a guarded try, so the LoRA
 list / bundle pack logic and the bundle validation run on any python.
 '''
 
 from __future__ import annotations
 
 import pytest
-from comfyui_lukutar_nodes.nodes.t2i import (
+from comfyui_lukutar_nodes.nodes.checkpoint_bundle import (
     BUNDLE_KEYS,
     BUNDLE_TYPE,
     INFO_TYPE,
     MAX_LORA_SLOTS,
-    T2IBundlePackNode,
-    T2ILoaderNode,
-    T2ILoraListNode,
-    T2ISamplerNode,
+    BundleKSamplerNode,
+    CheckpointBundleLoaderNode,
+    CheckpointBundlePackNode,
+    LoraListNode,
     _interpret_key,
     validate_bundle,
 )
 
 # ======================================================================
-# T2ILoraListNode
+# LoraListNode
 # ======================================================================
 
 
 def test_lora_list_node_claims_slots() -> None:
     """Claimed slots appear as (name, weight) pairs in order."""
-    node = T2ILoraListNode()
+    node = LoraListNode()
     kwargs: dict[str, object] = {}
     for i in range(1, MAX_LORA_SLOTS + 1):
         kwargs[f"lora_{i}"] = "None"
@@ -50,7 +50,7 @@ def test_lora_list_node_claims_slots() -> None:
 
 def test_lora_list_node_skips_zero_weights() -> None:
     """Zero-weight entries are dropped entirely."""
-    node = T2ILoraListNode()
+    node = LoraListNode()
     kwargs: dict[str, object] = {
         "lora_1": "a.safetensors",
         "weight_1": 0.0,
@@ -61,14 +61,14 @@ def test_lora_list_node_skips_zero_weights() -> None:
 
 def test_lora_list_node_empty() -> None:
     """All-None slots produce an empty tuple."""
-    node = T2ILoraListNode()
+    node = LoraListNode()
     (result,) = node.build()
     assert result == ()
 
 
 def test_lora_list_node_input_types_pairing() -> None:
     """Every lora_N combo is paired with a weight_N float."""
-    inputs = T2ILoraListNode.INPUT_TYPES()["required"]
+    inputs = LoraListNode.INPUT_TYPES()["required"]
     for i in range(1, MAX_LORA_SLOTS + 1):
         combo = inputs[f"lora_{i}"]
         weight = inputs[f"weight_{i}"]
@@ -79,13 +79,13 @@ def test_lora_list_node_input_types_pairing() -> None:
 
 
 # ======================================================================
-# T2IBundlePackNode / validate_bundle
+# CheckpointBundlePackNode / validate_bundle
 # ======================================================================
 
 
 def test_bundle_pack_roundtrip() -> None:
     """pack() produces a dict carrying every bundle key."""
-    node = T2IBundlePackNode()
+    node = CheckpointBundlePackNode()
     model, clip, vae = object(), object(), object()
     pos, neg, latent = object(), object(), object()
     (bundle,) = node.pack(
@@ -107,7 +107,7 @@ def test_bundle_pack_roundtrip() -> None:
 
 def test_bundle_pack_with_image() -> None:
     """An optional img lands in the bundle as-is."""
-    node = T2IBundlePackNode()
+    node = CheckpointBundlePackNode()
     img = object()
     (bundle,) = node.pack(
         model=1,
@@ -140,13 +140,13 @@ def test_validate_bundle_accepts_complete() -> None:
 
 
 # ======================================================================
-# T2ILoaderNode (outside-runtime behavior)
+# CheckpointBundleLoaderNode (outside-runtime behavior)
 # ======================================================================
 
 
 def test_loader_node_raises_outside_runtime() -> None:
     """load() refuses to run without the ComfyUI runtime."""
-    node = T2ILoaderNode()
+    node = CheckpointBundleLoaderNode()
     with pytest.raises(RuntimeError, match="ComfyUI runtime"):
         node.load(
             ckpt_name="m.safetensors",
@@ -165,29 +165,29 @@ def test_loader_node_raises_outside_runtime() -> None:
 
 def test_loader_node_has_lora_cache_slot() -> None:
     """The per-instance LoRA cache starts empty."""
-    node = T2ILoaderNode()
+    node = CheckpointBundleLoaderNode()
     assert node.loaded_lora is None
 
 
 # ======================================================================
-# T2ISamplerNode (outside-runtime behavior)
+# BundleKSamplerNode (outside-runtime behavior)
 # ======================================================================
 
 
 def test_sampler_node_is_output_node() -> None:
     """The sampler must be an OUTPUT_NODE so previews render."""
-    assert T2ISamplerNode.OUTPUT_NODE is True
+    assert BundleKSamplerNode.OUTPUT_NODE is True
 
 
 def test_sampler_node_io_types() -> None:
     """The sampler consumes and re-emits bundle + info."""
-    assert T2ISamplerNode.RETURN_TYPES == (BUNDLE_TYPE, INFO_TYPE)
-    assert T2ISamplerNode.RETURN_NAMES == ("bundle", "info")
+    assert BundleKSamplerNode.RETURN_TYPES == (BUNDLE_TYPE, INFO_TYPE)
+    assert BundleKSamplerNode.RETURN_NAMES == ("bundle", "info")
 
 
 def test_sampler_node_input_widgets() -> None:
     """Required widget set covers seed..vae_decode."""
-    inputs = T2ISamplerNode.INPUT_TYPES()["required"]
+    inputs = BundleKSamplerNode.INPUT_TYPES()["required"]
     for name in (
         "bundle",
         "info",
@@ -206,7 +206,7 @@ def test_sampler_node_input_widgets() -> None:
 
 def test_sampler_node_raises_outside_runtime() -> None:
     """sample() refuses to run without the ComfyUI runtime."""
-    node = T2ISamplerNode()
+    node = BundleKSamplerNode()
     with pytest.raises(RuntimeError, match="ComfyUI runtime"):
         node.sample(
             bundle={key: None for key in BUNDLE_KEYS},
@@ -295,7 +295,7 @@ def test_interpret_key_a1111_encodes_unweighted() -> None:
 
 def test_push_final_preview_noop_outside_runtime() -> None:
     """The final-preview push is a silent no-op without the runtime."""
-    from comfyui_lukutar_nodes.nodes.t2i import _push_final_preview
+    from comfyui_lukutar_nodes.nodes.checkpoint_bundle import _push_final_preview
 
     class FakePbar:
         total = 10

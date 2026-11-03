@@ -1,16 +1,16 @@
 '''
-File:   t2i_info.py
+File:   generation_info.py
 Brief:  Generation-info primitives for the LUKUTAR_INFO socket type.
 Author: Mistress-Lukutar
 Date:   2026-11-03
 Version: v0.1.0
 
-The T2I node set threads a portable "info" entity through the graph:
-an insertion-ordered ``dict[str, str]`` describing everything that was
-fed into and produced by the pipeline.  Keys deliberately reuse the
-A1111 infotext names (``Model``, ``Model hash``, ``Steps``, ...) so the
-``T2IInfoToA1111`` node can pass the mapping straight into the A1111
-parameters engine (``core/a1111_parameters.py``).
+The bundle node set threads a portable "info" entity through the
+graph: an insertion-ordered ``dict[str, str]`` describing everything
+that was fed into and produced by the pipeline.  Keys deliberately
+reuse the A1111 infotext names (``Model``, ``Model hash``, ``Steps``,
+...) so the ``InfoToA1111`` node can pass the mapping straight into
+the A1111 parameters engine (``core/a1111_parameters.py``).
 
 Prompts are stored under the lowercase keys :data:`PROMPT_KEY` /
 :data:`NEGATIVE_KEY` and are excluded from the settings block, exactly
@@ -25,7 +25,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: The ComfyUI socket type name shared by all T2I info nodes.
+#: The ComfyUI socket type name shared by all info nodes.
 INFO_TYPE: str = "LUKUTAR_INFO"
 
 #: Positive prompt key (excluded from the A1111 settings block).
@@ -58,10 +58,10 @@ SIZE_KEY: str = "Size"
 #: Batch size key.
 BATCH_KEY: str = "Batch size"
 
-#: Token normalization option key (see core/t2i_prompt.py).
+#: Token normalization option key (see core/weighted_prompt.py).
 TOKEN_NORM_KEY: str = "Token normalization"
 
-#: Weight interpretation option key (see core/t2i_prompt.py).
+#: Weight interpretation option key (see core/weighted_prompt.py).
 WEIGHT_INTERP_KEY: str = "Weight interpretation"
 
 #: Sampling seed key.
@@ -180,7 +180,7 @@ def build_loader_info(
     token_normalization: str,
     weight_interpretation: str,
 ) -> dict[str, str]:
-    '''Build the info dict emitted by the T2I Loader.
+    '''Build the info dict emitted by the checkpoint bundle loader.
 
     Args:
         prompt: Positive prompt text.
@@ -233,7 +233,7 @@ def with_sampling(
     with the sampling keys appended after the loader keys.
 
     Args:
-        info: Info dict from the T2I Loader (or another source).
+        info: Info dict from the checkpoint bundle loader (or another source).
         seed: Sampling seed.
         steps: Sampling step count.
         cfg: CFG scale.

@@ -1,11 +1,11 @@
 '''
-File:   test_t2i_prompt.py
-Brief:  Unit tests for the T2I prompt-weight normalization (torch-free).
+File:   test_weighted_prompt.py
+Brief:  Unit tests for the weighted-prompt normalization (torch-free).
 Author: Mistress-Lukutar
 Date:   2026-11-03
 Version: v0.1.0
 
-Tests core.t2i_prompt: option validation, divide_length,
+Tests core.weighted_prompt: option validation, divide_length,
 shift_mean_weight, normalize_weights, scale_to_norm.
 '''
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 
 import pytest
-from comfyui_lukutar_nodes.core.t2i_prompt import (
+from comfyui_lukutar_nodes.core.weighted_prompt import (
     TOKEN_NORMALIZATION,
     WEIGHT_INTERPRETATION,
     _norm_mag,

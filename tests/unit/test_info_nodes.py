@@ -1,18 +1,18 @@
 '''
-File:   test_t2i_info_nodes.py
-Brief:  Unit tests for the T2I info converter and utility nodes.
+File:   test_info_nodes.py
+Brief:  Unit tests for the info converter and utility nodes.
 Author: Mistress-Lukutar
 Date:   2026-11-03
 Version: v0.1.0
 
-Tests T2IInfoToA1111Node, T2IInfoUnpackNode and T2IInfoPackNode
+Tests InfoToA1111Node, InfoUnpackNode and InfoPackNode
 against the shared A1111 build_parameters engine.
 '''
 
 from __future__ import annotations
 
 from comfyui_lukutar_nodes.core.a1111_parameters import build_parameters
-from comfyui_lukutar_nodes.core.t2i_info import (
+from comfyui_lukutar_nodes.core.generation_info import (
     NEGATIVE_KEY,
     PROMPT_KEY,
     SEED_KEY,
@@ -20,14 +20,14 @@ from comfyui_lukutar_nodes.core.t2i_info import (
     build_loader_info,
     with_sampling,
 )
-from comfyui_lukutar_nodes.nodes.t2i import (
-    T2IInfoPackNode,
-    T2IInfoToA1111Node,
-    T2IInfoUnpackNode,
+from comfyui_lukutar_nodes.nodes.checkpoint_bundle import (
+    InfoPackNode,
+    InfoToA1111Node,
+    InfoUnpackNode,
 )
 
 # ======================================================================
-# T2IInfoToA1111Node
+# InfoToA1111Node
 # ======================================================================
 
 
@@ -63,7 +63,7 @@ def make_info() -> dict[str, str]:
 def test_converter_matches_build_parameters() -> None:
     """The composed text equals build_parameters on the same inputs."""
     info = make_info()
-    (metadata,) = T2IInfoToA1111Node().convert(info)
+    (metadata,) = InfoToA1111Node().convert(info)
 
     expected = build_parameters(
         "a cat",
@@ -75,7 +75,7 @@ def test_converter_matches_build_parameters() -> None:
 
 def test_converter_prompt_first_settings_after() -> None:
     """The text starts with the prompt, then settings in order."""
-    (metadata,) = T2IInfoToA1111Node().convert(make_info())
+    (metadata,) = InfoToA1111Node().convert(make_info())
     text = metadata["parameters"]
     lines = text.splitlines()
     assert lines[0] == "a cat"
@@ -86,33 +86,33 @@ def test_converter_prompt_first_settings_after() -> None:
 
 def test_converter_empty_info_yields_empty() -> None:
     """An empty info produces an empty metadata dict."""
-    (metadata,) = T2IInfoToA1111Node().convert({})
+    (metadata,) = InfoToA1111Node().convert({})
     assert metadata == {}
 
 
 def test_converter_none_info_yields_empty() -> None:
     """A None info produces an empty metadata dict."""
-    (metadata,) = T2IInfoToA1111Node().convert(None)
+    (metadata,) = InfoToA1111Node().convert(None)
     assert metadata == {}
 
 
 def test_converter_does_not_mutate_input() -> None:
     """The input info keeps its prompt keys."""
     info = make_info()
-    T2IInfoToA1111Node().convert(info)
+    InfoToA1111Node().convert(info)
     assert info[PROMPT_KEY] == "a cat"
     assert info[NEGATIVE_KEY] == "blurry"
 
 
 # ======================================================================
-# T2IInfoUnpackNode
+# InfoUnpackNode
 # ======================================================================
 
 
 def test_unpack_reads_standard_entries() -> None:
     """Named outputs carry the matching info values."""
-    outputs = T2IInfoUnpackNode().unpack(make_info())
-    names = T2IInfoUnpackNode.RETURN_NAMES
+    outputs = InfoUnpackNode().unpack(make_info())
+    names = InfoUnpackNode.RETURN_NAMES
     values = dict(zip(names, outputs, strict=True))
     assert values["model_name"] == "model_a"
     assert values["model_hash"] == "0123456789"
@@ -127,15 +127,15 @@ def test_unpack_reads_standard_entries() -> None:
 def test_unpack_metadata_is_full_copy() -> None:
     """The metadata output equals the whole info mapping."""
     info = make_info()
-    outputs = T2IInfoUnpackNode().unpack(info)
+    outputs = InfoUnpackNode().unpack(info)
     assert outputs[-1] == info
     assert outputs[-1] is not info
 
 
 def test_unpack_missing_entries_are_empty() -> None:
     """Missing entries yield empty strings; metadata stays a dict."""
-    names = T2IInfoUnpackNode.RETURN_NAMES
-    outputs = T2IInfoUnpackNode().unpack({SEED_KEY: "1"})
+    names = InfoUnpackNode.RETURN_NAMES
+    outputs = InfoUnpackNode().unpack({SEED_KEY: "1"})
     values = dict(zip(names, outputs, strict=True))
     assert values["seed"] == "1"
     assert all(
@@ -146,19 +146,19 @@ def test_unpack_missing_entries_are_empty() -> None:
 
 def test_unpack_none_info() -> None:
     """A None info yields empty strings and an empty dict."""
-    outputs = T2IInfoUnpackNode().unpack(None)
+    outputs = InfoUnpackNode().unpack(None)
     assert all(s == "" for s in outputs[:-1])
     assert outputs[-1] == {}
 
 
 # ======================================================================
-# T2IInfoPackNode
+# InfoPackNode
 # ======================================================================
 
 
 def test_pack_builds_from_pairs() -> None:
     """Claimed pairs land in the output in order."""
-    (info,) = T2IInfoPackNode().pack(
+    (info,) = InfoPackNode().pack(
         key_1="Model",
         value_1="m1",
         key_2="Steps",
@@ -169,7 +169,7 @@ def test_pack_builds_from_pairs() -> None:
 
 def test_pack_extends_base_and_overrides() -> None:
     """Later pairs win over the base info."""
-    (info,) = T2IInfoPackNode().pack(
+    (info,) = InfoPackNode().pack(
         info_in={SEED_KEY: "1", STEPS_KEY: "20"},
         key_1=SEED_KEY,
         value_1="99",
@@ -179,18 +179,18 @@ def test_pack_extends_base_and_overrides() -> None:
 
 def test_pack_skips_empty_keys() -> None:
     """Pairs with empty keys are dropped."""
-    (info,) = T2IInfoPackNode().pack(key_1="", value_1="x", key_2="A", value_2="b")
+    (info,) = InfoPackNode().pack(key_1="", value_1="x", key_2="A", value_2="b")
     assert info == {"A": "b"}
 
 
 def test_pack_does_not_mutate_base() -> None:
     """The input info mapping stays untouched."""
     base = {SEED_KEY: "1"}
-    T2IInfoPackNode().pack(info_in=base, key_1="A", value_1="b")
+    InfoPackNode().pack(info_in=base, key_1="A", value_1="b")
     assert base == {SEED_KEY: "1"}
 
 
 def test_pack_empty() -> None:
     """No inputs yield an empty dict."""
-    (info,) = T2IInfoPackNode().pack()
+    (info,) = InfoPackNode().pack()
     assert info == {}

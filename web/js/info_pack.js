@@ -1,25 +1,25 @@
 /**
- * File:   t2i_info_pack.js
- * Brief:  T2IInfoPack node — hide unused key_N/value_N pairs, show one free pair.
+ * File:   info_pack.js
+ * Brief:  InfoPack node — hide unused key_N/value_N pairs, show one free pair.
  * Author: Mistress-Lukutar
  * Date:   2026-11-03
  * Version: v0.1.0
  *
- * The backend (nodes/t2i.py, T2IInfoPackNode) declares key_1..key_4
+ * The backend (nodes/checkpoint_bundle.py, InfoPackNode) declares key_1..key_4
  * paired with value_1..value_4.  A pair is claimed when its key is a
  * non-empty string.  This extension shows every claimed pair plus one
- * free trailing pair and hides the rest, mirroring the T2I LoRA List
+ * free trailing pair and hides the rest, mirroring the LoRA List
  * interaction.
  *
- * Served at /extensions/<pack>/js/t2i_info_pack.js, hence the THREE
+ * Served at /extensions/<pack>/js/info_pack.js, hence the THREE
  * parent hops to reach /scripts/app.js.
  */
 
 import { app } from "../../../scripts/app.js";
 
-console.info("[LukutarNodes.T2IInfoPack] extension loaded");
+console.info("[LukutarNodes.InfoPack] extension loaded");
 
-const NODE_NAME = "T2IInfoPack";
+const NODE_NAME = "InfoPack";
 const KEY_PREFIX = "key_";
 const VALUE_PREFIX = "value_";
 const MAX_PAIRS = 4;
@@ -86,7 +86,7 @@ function scheduleSync() {
 /* ------------------------------------------------------------------ */
 
 app.registerExtension({
-  name: "LukutarNodes.T2IInfoPack",
+  name: "LukutarNodes.InfoPack",
   afterConfigureGraph() {
     // After a workflow load, re-apply visibility so hidden slots stay hidden.
     (app.graph?._nodes ?? []).forEach((node) => {
@@ -103,8 +103,8 @@ app.registerExtension({
       // Wrap every key_N widget callback so edits trigger re-visibility.
       for (let i = 1; i <= MAX_PAIRS; i++) {
         const w = findWidget(this, KEY_PREFIX + i);
-        if (!w || w.__lkT2IInfoPackHooked) continue;
-        w.__lkT2IInfoPackHooked = true;
+        if (!w || w.__lkInfoPackHooked) continue;
+        w.__lkInfoPackHooked = true;
         const callback = w.callback;
         w.callback = (...args) => {
           const cbResult = callback?.apply(this, args);

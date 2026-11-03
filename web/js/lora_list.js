@@ -1,24 +1,24 @@
 /**
- * File:   t2i_lora_list.js
- * Brief:  T2ILoraList node — hide unused lora_N/weight_N pairs, show one free pair.
+ * File:   lora_list.js
+ * Brief:  LoraList node — hide unused lora_N/weight_N pairs, show one free pair.
  * Author: Mistress-Lukutar
  * Date:   2026-11-03
  * Version: v0.1.0
  *
- * The backend (nodes/t2i.py, T2ILoraListNode) declares lora_1 .. lora_8
+ * The backend (nodes/checkpoint_bundle.py, LoraListNode) declares lora_1 .. lora_8
  * combo widgets paired with weight_1 .. weight_8 floats.  This extension
  * hides every unclaimed pair and shows exactly one free trailing pair so
  * the user can keep adding LoRAs without seeing eight blank rows.
  *
- * Served at /extensions/<pack>/js/t2i_lora_list.js, hence the THREE
+ * Served at /extensions/<pack>/js/lora_list.js, hence the THREE
  * parent hops to reach /scripts/app.js.
  */
 
 import { app } from "../../../scripts/app.js";
 
-console.info("[LukutarNodes.T2ILoraList] extension loaded");
+console.info("[LukutarNodes.LoraList] extension loaded");
 
-const NODE_NAME = "T2ILoraList";
+const NODE_NAME = "LoraList";
 const LORA_PREFIX = "lora_";
 const WEIGHT_PREFIX = "weight_";
 const MAX_SLOTS = 8;
@@ -95,7 +95,7 @@ function scheduleSync() {
 /* ------------------------------------------------------------------ */
 
 app.registerExtension({
-  name: "LukutarNodes.T2ILoraList",
+  name: "LukutarNodes.LoraList",
   afterConfigureGraph() {
     // After a workflow load, re-apply visibility so hidden slots stay hidden.
     (app.graph?._nodes ?? []).forEach((node) => {
@@ -112,8 +112,8 @@ app.registerExtension({
       // Wrap every lora_N widget callback so changes trigger re-visibility.
       for (let i = 1; i <= MAX_SLOTS; i++) {
         const w = findWidget(this, LORA_PREFIX + i);
-        if (!w || w.__lkT2ILoraListHooked) continue;
-        w.__lkT2ILoraListHooked = true;
+        if (!w || w.__lkLoraListHooked) continue;
+        w.__lkLoraListHooked = true;
         const callback = w.callback;
         w.callback = (...args) => {
           const cbResult = callback?.apply(this, args);

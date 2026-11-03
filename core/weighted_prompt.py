@@ -1,16 +1,16 @@
 '''
-File:   t2i_prompt.py
-Brief:  Token-weight normalization math for the T2I prompt engine.
+File:   weighted_prompt.py
+Brief:  Token-weight normalization math for the weighted prompt engine.
 Author: Mistress-Lukutar
 Date:   2026-11-03
 Version: v0.1.0
 
 This module is torch-free on purpose (see AGENTS.md architecture
 boundaries).  It holds the pure-python parts of the weighted prompt
-encoding engine used by the T2I nodes: the combo option tables and the
-list-based weight normalization strategies.  The tensor-side weight
-interpretations live in ``nodes/t2i.py`` where the CLIP models are
-available.
+encoding engine used by the checkpoint bundle nodes: the combo option
+tables and the list-based weight normalization strategies.  The
+tensor-side weight interpretations live in
+``nodes/checkpoint_bundle.py`` where the CLIP models are available.
 
 Token lists arrive from ``CLIP.tokenize(text, return_word_ids=True)``:
 a sequence (one entry per batch line) of token rows, where each row is
