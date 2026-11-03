@@ -6,7 +6,7 @@ Date:   2026-11-03
 Version: v0.1.0
 
 Tests core.generation_info: formatters, build_loader_info, with_sampling,
-get, settings_pairs.
+get, settings_pairs, a1111_settings.
 '''
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from comfyui_lukutar_nodes.core.generation_info import (
     STEPS_KEY,
     VAE_DECODE_KEY,
     VAE_KEY,
+    a1111_settings,
     a1111_weight_str,
     build_loader_info,
     format_lora_entries,
@@ -241,3 +242,85 @@ def test_settings_pairs_excludes_prompts() -> None:
     }
     result = settings_pairs(info)
     assert result == {MODEL_KEY: "m", STEPS_KEY: "20"}
+
+
+# ======================================================================
+# a1111_settings
+# ======================================================================
+
+
+def test_a1111_settings_drops_non_a1111_keys() -> None:
+    """Pack-engine keys with no A1111 counterpart are removed."""
+    info = {
+        MODEL_KEY: "m",
+        BATCH_KEY: "1",
+        "Token normalization": "mean",
+        "Weight interpretation": "comfy",
+        VAE_DECODE_KEY: "enabled",
+    }
+    assert a1111_settings(info) == {MODEL_KEY: "m"}
+
+
+def test_a1111_settings_clip_skip_positive_and_default_dropped() -> None:
+    """Clip skip is emitted positive; a count of 1 drops the key."""
+    assert a1111_settings({"Clip skip": "-2"}) == {"Clip skip": "2"}
+    assert a1111_settings({"Clip skip": "2"}) == {"Clip skip": "2"}
+    assert a1111_settings({"Clip skip": "-1"}) == {}
+    assert a1111_settings({"Clip skip": "1"}) == {}
+    assert a1111_settings({"Clip skip": "custom"}) == {"Clip skip": "custom"}
+
+
+def test_a1111_settings_size_spaces_normalized() -> None:
+    """Size 'W x H' is normalised to A1111's 'WxH'."""
+    assert a1111_settings({SIZE_KEY: "1024 x 1536"}) == {SIZE_KEY: "1024x1536"}
+    assert a1111_settings({SIZE_KEY: "1024x1536"}) == {SIZE_KEY: "1024x1536"}
+    assert a1111_settings({SIZE_KEY: "wide"}) == {SIZE_KEY: "wide"}
+
+
+def test_a1111_settings_drops_baked_vae() -> None:
+    """'VAE: baked' (ComfyUI-ese) is dropped; a real VAE name stays."""
+    assert a1111_settings({VAE_KEY: "baked"}) == {}
+    assert a1111_settings({VAE_KEY: "Baked"}) == {}
+    assert a1111_settings({VAE_KEY: "vae-ft-mse.safetensors"}) == {
+        VAE_KEY: "vae-ft-mse.safetensors"
+    }
+
+
+def test_a1111_settings_translates_sampler_and_schedule() -> None:
+    """Comfy sampler/scheduler names map to native A1111 names."""
+    info = {SAMPLER_KEY: "euler_ancestral", SCHEDULER_KEY: "sgm_uniform"}
+    result = a1111_settings(info)
+    assert result == {SAMPLER_KEY: "Euler a", SCHEDULER_KEY: "SGM Uniform"}
+
+
+def test_a1111_settings_unknown_sampler_passes_through() -> None:
+    """Names outside the maps pass through verbatim."""
+    info = {SAMPLER_KEY: "res_multistep", SCHEDULER_KEY: "beta"}
+    result = a1111_settings(info)
+    assert result == {SAMPLER_KEY: "res_multistep", SCHEDULER_KEY: "Beta"}
+
+
+def test_a1111_settings_keeps_unknown_keys_and_order() -> None:
+    """User-added entries survive; insertion order is preserved."""
+    info = {
+        PROMPT_KEY: "p",
+        NEGATIVE_KEY: "n",
+        "Custom key": "value",
+        STEPS_KEY: "20",
+    }
+    result = a1111_settings(info)
+    assert list(result.keys()) == ["Custom key", STEPS_KEY]
+    assert result == {"Custom key": "value", STEPS_KEY: "20"}
+
+
+def test_a1111_settings_skips_none_and_empty_values() -> None:
+    """None values and blank strings never reach the output."""
+    info = {STEPS_KEY: None, CFG_KEY: "  ", MODEL_KEY: "m"}
+    assert a1111_settings(info) == {MODEL_KEY: "m"}
+
+
+def test_a1111_settings_does_not_mutate_input() -> None:
+    """The input mapping stays untouched."""
+    info = {"Clip skip": "-2", SIZE_KEY: "8 x 8"}
+    a1111_settings(info)
+    assert info == {"Clip skip": "-2", SIZE_KEY: "8 x 8"}

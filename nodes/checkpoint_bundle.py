@@ -84,9 +84,9 @@ from ..core.generation_info import (
     VAE_DECODE_KEY,
     VAE_KEY,
     WEIGHT_INTERP_KEY,
+    a1111_settings,
     build_loader_info,
     format_lora_entries,
-    settings_pairs,
     with_sampling,
 )
 from ..core.generation_info import (
@@ -1270,7 +1270,10 @@ class InfoToA1111Node:
     Emits a single LUKUTAR_METADATA entry ``{"parameters": text}``
     where *text* is the A1111 infotext (prompt line, optional
     ``Negative prompt:`` line, then the settings block), composed by
-    the same engine as the A1111 node set.
+    the same engine as the A1111 node set. Pack-specific info entries
+    with no A1111 counterpart are excluded and A1111-convention values
+    (``Clip skip`` positive, ``Size`` without spaces, native sampler /
+    schedule names) are normalised by :func:`a1111_settings`.
     '''
 
     CATEGORY = "Lukutar/Info"
@@ -1299,8 +1302,9 @@ class InfoToA1111Node:
 
         Args:
             info: The info mapping (prompt / negative_prompt keys are
-                separated out; everything else forms the settings
-                block in order).
+                separated out; everything else goes through
+                :func:`a1111_settings` and forms the settings block
+                in order).
 
         Returns:
             Tuple of (metadata dict,) with the single ``parameters``
@@ -1309,7 +1313,7 @@ class InfoToA1111Node:
         entries = dict(info) if isinstance(info, dict) else {}
         prompt = entries.pop(PROMPT_KEY, "")
         negative = entries.pop(NEGATIVE_KEY, "")
-        text = build_parameters(prompt, negative, settings_pairs(entries))
+        text = build_parameters(prompt, negative, a1111_settings(entries))
         metadata: dict[str, str] = {"parameters": text} if text else {}
         return (metadata,)
 

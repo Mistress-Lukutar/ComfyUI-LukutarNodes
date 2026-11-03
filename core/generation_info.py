@@ -9,8 +9,10 @@ The bundle node set threads a portable "info" entity through the
 graph: an insertion-ordered ``dict[str, str]`` describing everything
 that was fed into and produced by the pipeline.  Keys deliberately
 reuse the A1111 infotext names (``Model``, ``Model hash``, ``Steps``,
-...) so the ``InfoToA1111`` node can pass the mapping straight into
-the A1111 parameters engine (``core/a1111_parameters.py``).
+...) so the ``InfoToA1111`` node can convert the mapping into the
+A1111 parameters engine's settings block
+(``core/a1111_parameters.py``) via :func:`a1111_settings`, which
+filters pack-only entries and normalises A1111-convention values.
 
 Prompts are stored under the lowercase keys :data:`PROMPT_KEY` /
 :data:`NEGATIVE_KEY` and are excluded from the settings block, exactly
@@ -20,6 +22,7 @@ like the A1111 infotext format itself.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -294,3 +297,123 @@ def settings_pairs(info: Mapping[str, Any]) -> dict[str, str]:
         for k, v in info.items()
         if k not in _PROMPT_KEYS and v is not None
     }
+
+
+# ------------------------------------------------------------------ #
+# A1111-compatible settings conversion                               #
+# ------------------------------------------------------------------ #
+
+#: Pack-engine keys with no A1111 infotext counterpart: emitted by the
+#: bundle pipeline but never valid in A1111 ``parameters`` text.
+NON_A1111_KEYS: frozenset[str] = frozenset(
+    {
+        BATCH_KEY,
+        TOKEN_NORM_KEY,
+        WEIGHT_INTERP_KEY,
+        VAE_DECODE_KEY,
+    }
+)
+
+#: ComfyUI sampler name -> A1111 infotext sampler name. Names outside
+#: this map (CFG++ variants, custom samplers) pass through unchanged.
+A1111_SAMPLER_NAMES: dict[str, str] = {
+    "euler": "Euler",
+    "euler_ancestral": "Euler a",
+    "heun": "Heun",
+    "lms": "LMS",
+    "dpm_2": "DPM2",
+    "dpm_2_ancestral": "DPM2 a",
+    "dpmpp_2s_ancestral": "DPM++ 2S a",
+    "dpmpp_2m": "DPM++ 2M",
+    "dpmpp_sde": "DPM++ SDE",
+    "dpmpp_2m_sde": "DPM++ 2M SDE",
+    "dpmpp_2m_sde_heun": "DPM++ 2M SDE Heun",
+    "dpmpp_3m_sde": "DPM++ 3M SDE",
+    "dpm_fast": "DPM fast",
+    "dpm_adaptive": "DPM adaptive",
+    "ddim": "DDIM",
+    "plms": "PLMS",
+    "uni_pc": "UniPC",
+    "restart": "Restart",
+}
+
+#: ComfyUI scheduler name -> A1111 infotext ``Schedule type`` value.
+A1111_SCHEDULE_TYPES: dict[str, str] = {
+    "normal": "Normal",
+    "karras": "Karras",
+    "exponential": "Exponential",
+    "sgm_uniform": "SGM Uniform",
+    "simple": "Simple",
+    "linear": "Linear",
+    "ddim_uniform": "DDIM Uniform",
+    "beta": "Beta",
+    "kl_optimal": "KL Optimal",
+    "align_your_steps": "Align Your Steps",
+}
+
+#: ``Size`` values in the ``"{width} x {height}"`` loader format.
+_SIZE_SPACES_RE = re.compile(r"^(\d+)\s*x\s*(\d+)$")
+
+
+def a1111_settings(info: Mapping[str, Any]) -> dict[str, str]:
+    '''Build an A1111-compatible settings dict from an info mapping.
+
+    Everything that has no A1111 infotext counterpart is removed, and
+    values deviating from A1111 conventions are normalised:
+
+    * :data:`NON_A1111_KEYS` (``Batch size``, ``Token normalization``,
+      ``Weight interpretation``, ``VAE decode``) are dropped — A1111's
+      infotext never contains them and some parsers choke on them.
+    * ``VAE: baked`` is dropped (ComfyUI-ese; A1111 expects a VAE file
+      name).
+    * ``Clip skip`` is emitted as the positive layers-to-skip count
+      (``-2`` -> ``2``); a count of ``1`` (no skip) drops the key,
+      matching A1111 which only writes it when skipping.
+    * ``Size`` ``"{width} x {height}"`` is normalised to A1111's
+      ``"{width}x{height}"`` (no spaces).
+    * ``Sampler`` / ``Schedule type`` values are translated through
+      :data:`A1111_SAMPLER_NAMES` / :data:`A1111_SCHEDULE_TYPES`.
+
+    Unknown keys pass through verbatim, so user-added entries survive.
+
+    Args:
+        info: Info mapping (prompt keys and ``None``/empty values are
+            skipped, order preserved).
+
+    Returns:
+        A fresh ``dict[str, str]`` for ``build_parameters``.
+    '''
+    result: dict[str, str] = {}
+    for key, value in info.items():
+        if key in _PROMPT_KEYS or key in NON_A1111_KEYS or value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+
+        if key == CLIP_SKIP_KEY:
+            try:
+                skip = abs(int(text))
+            except ValueError:
+                pass
+            else:
+                if skip > 1:
+                    result[key] = str(skip)
+                continue
+
+        elif key == SIZE_KEY:
+            match = _SIZE_SPACES_RE.fullmatch(text)
+            if match:
+                text = f"{match.group(1)}x{match.group(2)}"
+
+        elif key == VAE_KEY and text.lower() == "baked":
+            continue
+
+        elif key == SAMPLER_KEY:
+            text = A1111_SAMPLER_NAMES.get(text, text)
+
+        elif key == SCHEDULER_KEY:
+            text = A1111_SCHEDULE_TYPES.get(text, text)
+
+        result[key] = text
+    return result

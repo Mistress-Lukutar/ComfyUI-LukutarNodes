@@ -81,7 +81,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
   a live latent preview and an optional VAE decode whose image replaces
   the noise preview (`Lukutar/Bundle`).
 - **Info to A1111 Parameters** — convert the info entity into the
-  A1111 `parameters` metadata block (`Lukutar/Info`).
+  A1111 `parameters` metadata block, filtering out pack-only fields and
+  normalising values to the official A1111 infotext format
+  (`Lukutar/Info`).
 - **Info Unpack** — read the standard info entries as separate
   string outputs (`Lukutar/Info`).
 - **Info Pack** — assemble an info entity from an optional base
@@ -889,6 +891,28 @@ the settings block in info order — composed by the same
 never emitted as settings pairs; an empty info yields an empty
 metadata dict. The output plugs into Merge Metadata, Save Image
 (Metadata) or any LUKUTAR_METADATA consumer.
+
+#### A1111 compatibility filtering
+
+Entries with no official A1111 infotext counterpart are removed and
+A1111-convention values are normalised (`a1111_settings` in
+`core/generation_info.py`), so external A1111 / Forge PNG-info parsers
+never see pack-specific data:
+
+- Dropped keys: `Batch size`, `Token normalization`, `Weight
+  interpretation`, `VAE decode` — A1111's infotext format has no such
+  fields.
+- Dropped values: `VAE: baked` (ComfyUI-ese; A1111 expects a VAE file
+  name). A real VAE name is kept.
+- `Clip skip` is emitted as the positive layers-to-skip count
+  (`-2` → `Clip skip: 2`); a count of `1` (no skipping) drops the key,
+  like A1111 itself.
+- `Size` `1024 x 1536` is normalised to A1111's space-free
+  `1024x1536` (parsers regex `(\d+)x(\d+)`).
+- `Sampler` / `Schedule type` values are translated to native A1111
+  names (`euler_ancestral` → `Euler a`, `sgm_uniform` → `SGM Uniform`,
+  …); names outside the translation maps pass through unchanged.
+- Any other (user-added) info entries pass through verbatim.
 
 ### Info Unpack
 

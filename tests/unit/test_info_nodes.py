@@ -17,6 +17,7 @@ from comfyui_lukutar_nodes.core.generation_info import (
     PROMPT_KEY,
     SEED_KEY,
     STEPS_KEY,
+    a1111_settings,
     build_loader_info,
     with_sampling,
 )
@@ -61,14 +62,17 @@ def make_info() -> dict[str, str]:
 
 
 def test_converter_matches_build_parameters() -> None:
-    """The composed text equals build_parameters on the same inputs."""
+    """The composed text equals build_parameters over a1111_settings."""
     info = make_info()
     (metadata,) = InfoToA1111Node().convert(info)
 
     expected = build_parameters(
         "a cat",
         "blurry",
-        {k: v for k, v in info.items() if k not in (PROMPT_KEY, NEGATIVE_KEY)},
+        a1111_settings(
+            {k: v for k, v in info.items()
+             if k not in (PROMPT_KEY, NEGATIVE_KEY)},
+        ),
     )
     assert metadata == {"parameters": expected}
 
@@ -82,6 +86,31 @@ def test_converter_prompt_first_settings_after() -> None:
     assert lines[1] == "Negative prompt: blurry"
     assert "Model: model_a" in text
     assert "Seed: 42" in text
+
+
+def test_converter_excludes_non_a1111_keys() -> None:
+    """Pack-engine keys with no A1111 counterpart never reach the text."""
+    (metadata,) = InfoToA1111Node().convert(make_info())
+    text = metadata["parameters"]
+    for fragment in (
+        "Batch size:",
+        "Token normalization:",
+        "Weight interpretation:",
+        "VAE decode:",
+    ):
+        assert fragment not in text
+
+
+def test_converter_normalizes_a1111_values() -> None:
+    """Clip skip goes positive, Size loses spaces, VAE:baked is dropped,
+    sampler/schedule get their native A1111 names."""
+    (metadata,) = InfoToA1111Node().convert(make_info())
+    text = metadata["parameters"]
+    assert "Clip skip: 2" in text
+    assert "Size: 832x1216" in text
+    assert "VAE:" not in text
+    assert "Sampler: Euler" in text
+    assert "Schedule type: Normal" in text
 
 
 def test_converter_empty_info_yields_empty() -> None:
