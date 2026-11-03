@@ -304,10 +304,13 @@ def settings_pairs(info: Mapping[str, Any]) -> dict[str, str]:
 # ------------------------------------------------------------------ #
 
 #: Pack-engine keys with no A1111 infotext counterpart: emitted by the
-#: bundle pipeline but never valid in A1111 ``parameters`` text.
+#: bundle pipeline but never valid in A1111 ``parameters`` text. The
+#: ``Lora`` entry is pack-only too — A1111 records LoRA weights via
+#: ``<lora:name:weight>`` prompt tags and hashes via ``Lora hashes``.
 NON_A1111_KEYS: frozenset[str] = frozenset(
     {
         BATCH_KEY,
+        LORA_KEY,
         TOKEN_NORM_KEY,
         WEIGHT_INTERP_KEY,
         VAE_DECODE_KEY,
@@ -354,6 +357,97 @@ A1111_SCHEDULE_TYPES: dict[str, str] = {
 #: ``Size`` values in the ``"{width} x {height}"`` loader format.
 _SIZE_SPACES_RE = re.compile(r"^(\d+)\s*x\s*(\d+)$")
 
+#: Model-file extensions stripped from ``Lora hashes`` entry names —
+#: A1111 writes the LoRA *name* there (``"Mawshot (1): 9ec5889be9"``),
+#: never the file name with its extension.
+_MODEL_FILE_EXTS: tuple[str, ...] = (
+    ".safetensors",
+    ".ckpt",
+    ".pt",
+    ".pth",
+    ".bin",
+    ".sft",
+    ".gguf",
+)
+
+#: Canonical A1111 infotext key order (a subset of A1111's
+#: ``create_infotext`` insertion order). Known keys are emitted in this
+#: sequence — external parsers often match unit patterns such as
+#: ``Model hash: X, Model: Y`` — and every other key follows in its
+#: original info order.
+_A1111_KEY_ORDER: tuple[str, ...] = (
+    STEPS_KEY,
+    SAMPLER_KEY,
+    SCHEDULER_KEY,
+    CFG_KEY,
+    SEED_KEY,
+    SIZE_KEY,
+    MODEL_HASH_KEY,
+    MODEL_KEY,
+    "VAE hash",
+    VAE_KEY,
+    DENOISE_KEY,
+    "Conditional mask weight",
+    CLIP_SKIP_KEY,
+    "Hires checkpoint",
+    "Hires upscale",
+    "Hires upscaler",
+    "Hires steps",
+    "Hires resize-1",
+    "Hires resize-2",
+    LORA_HASHES_KEY,
+    "TI hashes",
+    "ENSD",
+    "Eta",
+    "Eta DDIM",
+    "RNG",
+    "Tiling",
+    "Seed resize from",
+    "Version",
+    "Hash",
+    "User",
+    "Batch mask weight",
+    "N first pass sizes",
+    "Original Size",
+)
+
+
+def _strip_model_ext(name: str) -> str:
+    '''Strip a known model-file extension from a LoRA name.
+
+    Args:
+        name: LoRA name, possibly a file name like
+            ``"Mawshot (1).safetensors"``.
+
+    Returns:
+        The name without a known model-file extension; dotted names
+        whose suffix is not a known model extension stay untouched.
+    '''
+    lowered = name.lower()
+    for ext in _MODEL_FILE_EXTS:
+        if lowered.endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
+def _strip_lora_hash_exts(text: str) -> str:
+    '''Strip model-file extensions from ``Lora hashes`` entry names.
+
+    Args:
+        text: Raw ``"name: hash"`` entries comma-joined (unquoted).
+
+    Returns:
+        The entries with A1111-style extension-free names; malformed
+        entries pass through untouched.
+    '''
+    parts: list[str] = []
+    for entry in text.split(", "):
+        name, sep, hash_str = entry.partition(": ")
+        parts.append(
+            f"{_strip_model_ext(name)}: {hash_str}" if sep else entry
+        )
+    return ", ".join(parts)
+
 
 def a1111_settings(info: Mapping[str, Any]) -> dict[str, str]:
     '''Build an A1111-compatible settings dict from an info mapping.
@@ -361,9 +455,10 @@ def a1111_settings(info: Mapping[str, Any]) -> dict[str, str]:
     Everything that has no A1111 infotext counterpart is removed, and
     values deviating from A1111 conventions are normalised:
 
-    * :data:`NON_A1111_KEYS` (``Batch size``, ``Token normalization``,
-      ``Weight interpretation``, ``VAE decode``) are dropped — A1111's
-      infotext never contains them and some parsers choke on them.
+    * :data:`NON_A1111_KEYS` (``Batch size``, ``Lora``, ``Token
+      normalization``, ``Weight interpretation``, ``VAE decode``) are
+      dropped — A1111's infotext never contains them and some parsers
+      choke on them.
     * ``VAE: baked`` is dropped (ComfyUI-ese; A1111 expects a VAE file
       name).
     * ``Clip skip`` is emitted as the positive layers-to-skip count
@@ -373,12 +468,20 @@ def a1111_settings(info: Mapping[str, Any]) -> dict[str, str]:
       ``"{width}x{height}"`` (no spaces).
     * ``Sampler`` / ``Schedule type`` values are translated through
       :data:`A1111_SAMPLER_NAMES` / :data:`A1111_SCHEDULE_TYPES`.
+    * ``Lora hashes`` entry names lose their model-file extension
+      (``"Mawshot (1).safetensors: 9ec5889be9"`` ->
+      ``"Mawshot (1): 9ec5889be9"``), the A1111 convention that
+      lets parsers match the LoRA.
+    * The entries are reordered into the canonical A1111 infotext
+      order (:data:`_A1111_KEY_ORDER`), so pairs like ``Model hash,
+      Model`` appear where parsers expect them.
 
-    Unknown keys pass through verbatim, so user-added entries survive.
+    Unknown keys pass through verbatim after the known ones, so
+    user-added entries survive.
 
     Args:
         info: Info mapping (prompt keys and ``None``/empty values are
-            skipped, order preserved).
+            skipped).
 
     Returns:
         A fresh ``dict[str, str]`` for ``build_parameters``.
@@ -415,5 +518,12 @@ def a1111_settings(info: Mapping[str, Any]) -> dict[str, str]:
         elif key == SCHEDULER_KEY:
             text = A1111_SCHEDULE_TYPES.get(text, text)
 
+        elif key == LORA_HASHES_KEY:
+            text = _strip_lora_hash_exts(text)
+
         result[key] = text
-    return result
+
+    order = {k: i for i, k in enumerate(_A1111_KEY_ORDER)}
+    return dict(
+        sorted(result.items(), key=lambda kv: order.get(kv[0], len(order)))
+    )

@@ -915,9 +915,10 @@ A1111-convention values are normalised (`a1111_settings` in
 `core/generation_info.py`), so external A1111 / Forge PNG-info parsers
 never see pack-specific data:
 
-- Dropped keys: `Batch size`, `Token normalization`, `Weight
+- Dropped keys: `Batch size`, `Lora`, `Token normalization`, `Weight
   interpretation`, `VAE decode` — A1111's infotext format has no such
-  fields.
+  fields (LoRA weights live in `<lora:name:weight>` prompt tags, hashes
+  in `Lora hashes`).
 - Dropped values: `VAE: baked` (ComfyUI-ese; A1111 expects a VAE file
   name). A real VAE name is kept.
 - `Clip skip` is emitted as the positive layers-to-skip count
@@ -928,7 +929,15 @@ never see pack-specific data:
 - `Sampler` / `Schedule type` values are translated to native A1111
   names (`euler_ancestral` → `Euler a`, `sgm_uniform` → `SGM Uniform`,
   …); names outside the translation maps pass through unchanged.
-- Any other (user-added) info entries pass through verbatim.
+- `Lora hashes` entry names lose their model-file extension
+  (`Mawshot (1).safetensors: 9ec5889be9` → `Mawshot (1):
+  9ec5889be9`) — A1111 matches LoRAs by extension-free name/hash.
+- Entries are reordered into the canonical A1111 infotext order
+  (`Steps`, `Sampler`, `Schedule type`, `CFG scale`, `Seed`, `Size`,
+  `Model hash`, `Model`, … `Lora hashes`, …); pairs such as `Model
+  hash, Model` stay adjacent for parsers that match them as a unit.
+- Any other (user-added) info entries pass through verbatim, after the
+  known keys.
 
 ### Info Unpack
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 from comfyui_lukutar_nodes.core.generation_info import (
     BATCH_KEY,
     CFG_KEY,
+    CLIP_SKIP_KEY,
     DENOISE_KEY,
     LORA_HASHES_KEY,
     LORA_KEY,
@@ -261,6 +262,69 @@ def test_a1111_settings_drops_non_a1111_keys() -> None:
     assert a1111_settings(info) == {MODEL_KEY: "m"}
 
 
+def test_a1111_settings_drops_lora_key() -> None:
+    """'Lora' is not an A1111 infotext key — weights live in prompt tags."""
+    assert a1111_settings({LORA_KEY: "mawshot.safetensors:0.8"}) == {}
+    assert a1111_settings({LORA_KEY: "", LORA_HASHES_KEY: "l1: ab"}) == {
+        LORA_HASHES_KEY: "l1: ab"
+    }
+
+
+def test_a1111_settings_strips_lora_hash_extensions() -> None:
+    """Lora hashes names lose model-file extensions (A1111 convention)."""
+    info = {LORA_HASHES_KEY: "Mawshot (1).safetensors: 9ec5889be9, "
+            "Vore_Internals_Illustrious-XL: 985fccd41b"}
+    assert a1111_settings(info) == {
+        LORA_HASHES_KEY: "Mawshot (1): 9ec5889be9, "
+        "Vore_Internals_Illustrious-XL: 985fccd41b"
+    }
+    assert a1111_settings({LORA_HASHES_KEY: "noext: ab"}) == {
+        LORA_HASHES_KEY: "noext: ab"
+    }
+    # Dotted names that are not model extensions stay untouched.
+    assert a1111_settings({LORA_HASHES_KEY: "3.5 v2: ab"}) == {
+        LORA_HASHES_KEY: "3.5 v2: ab"
+    }
+    # Malformed entries pass through.
+    assert a1111_settings({LORA_HASHES_KEY: "junk"}) == {
+        LORA_HASHES_KEY: "junk"
+    }
+
+
+def test_a1111_settings_canonical_order() -> None:
+    """Known keys are emitted in A1111's canonical infotext order."""
+    info = {  # loader (insertion) order
+        MODEL_KEY: "m",
+        MODEL_HASH_KEY: "abc1234567",
+        CLIP_SKIP_KEY: "-2",
+        LORA_KEY: "l.safetensors:0.8",
+        LORA_HASHES_KEY: "l1: ab, l2: cd",
+        SIZE_KEY: "1024 x 1536",
+        SEED_KEY: "42",
+        STEPS_KEY: "40",
+        CFG_KEY: "5.0",
+        SAMPLER_KEY: "euler_ancestral",
+        SCHEDULER_KEY: "karras",
+        DENOISE_KEY: "1.0",
+        "Custom key": "value",
+    }
+    result = a1111_settings(info)
+    assert list(result.keys()) == [
+        STEPS_KEY,
+        SAMPLER_KEY,
+        SCHEDULER_KEY,
+        CFG_KEY,
+        SEED_KEY,
+        SIZE_KEY,
+        MODEL_HASH_KEY,
+        MODEL_KEY,
+        DENOISE_KEY,
+        CLIP_SKIP_KEY,
+        LORA_HASHES_KEY,
+        "Custom key",
+    ]
+
+
 def test_a1111_settings_clip_skip_positive_and_default_dropped() -> None:
     """Clip skip is emitted positive; a count of 1 drops the key."""
     assert a1111_settings({"Clip skip": "-2"}) == {"Clip skip": "2"}
@@ -301,7 +365,8 @@ def test_a1111_settings_unknown_sampler_passes_through() -> None:
 
 
 def test_a1111_settings_keeps_unknown_keys_and_order() -> None:
-    """User-added entries survive; insertion order is preserved."""
+    """User-added entries survive; known keys lead in canonical order and
+    unknown keys keep their relative order after them."""
     info = {
         PROMPT_KEY: "p",
         NEGATIVE_KEY: "n",
@@ -309,8 +374,11 @@ def test_a1111_settings_keeps_unknown_keys_and_order() -> None:
         STEPS_KEY: "20",
     }
     result = a1111_settings(info)
-    assert list(result.keys()) == ["Custom key", STEPS_KEY]
+    assert list(result.keys()) == [STEPS_KEY, "Custom key"]
     assert result == {"Custom key": "value", STEPS_KEY: "20"}
+
+    unknown_only = a1111_settings({"z": "1", "a": "2"})
+    assert list(unknown_only.keys()) == ["z", "a"]
 
 
 def test_a1111_settings_skips_none_and_empty_values() -> None:
