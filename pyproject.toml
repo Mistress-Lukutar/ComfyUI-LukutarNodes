@@ -5,7 +5,7 @@
 [project]
 # Registry node name — immutable after the first publish.
 name = "lukutar-nodes"
-version = "0.13.0"
+version = "0.14.0"
 description = "ComfyUI custom node pack: color matching, SEGS overlays, prompt annotation, workflow variables, group switching, seed history."
 authors = [{ name = "Mistress-Lukutar" }]
 readme = "README.md"
