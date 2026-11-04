@@ -870,10 +870,12 @@ re-emits the bundle plus the info entity (`Lukutar/Bundle`).
   (which are only revoked on the next run), and the legacy canvas
   renderer draws `node.imgs`, which is fed exclusively by preview
   frames.
-- The decoded frames are also saved as temp PNGs (same layout as
-  ComfyUI's own PreviewImage: `LukutarBundleKSampler_temp_00001_.png`,
-  …, in the ComfyUI temp directory) and emitted as the `executed`
-  output ui. The `web/js/ksampler_bundle.js` extension consumes them:
+- The decoded frames are also saved as temp PNGs — `tmp_00001.png`,
+  …, in the ComfyUI temp directory, with the `prompt` and `workflow`
+  metadata chunks embedded (core SaveImage semantics, so a file can be
+  dragged back onto the canvas and restores the workflow) — and
+  emitted as the `executed` output ui. The
+  `web/js/ksampler_bundle.js` extension consumes them:
   it keeps the v2 output section hidden (`node.hideOutputImages` — the
   preview channel already shows the same picture, and the section
   would render it a second time) and fills `node.imgs` with `/view`

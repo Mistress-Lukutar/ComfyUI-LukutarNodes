@@ -318,3 +318,35 @@ def test_save_temp_previews_raises_outside_runtime() -> None:
 
     with pytest.raises(RuntimeError, match="ComfyUI runtime"):
         save_temp_previews(object())
+
+
+def test_build_png_info_embeds_prompt_and_workflow() -> None:
+    """Temp previews carry the prompt/workflow chunks (SaveImage style)."""
+    import io
+
+    PILImage = pytest.importorskip("PIL.Image")
+    from comfyui_lukutar_nodes.nodes.checkpoint_bundle import _build_png_info
+
+    png_info = _build_png_info(
+        {"3": {"class_type": "BundleKSampler", "inputs": {}}},
+        {"workflow": {"nodes": [1, 2, 3]}},
+    )
+    assert png_info is not None
+
+    buffer = io.BytesIO()
+    PILImage.new("RGB", (2, 2)).save(buffer, format="PNG", pnginfo=png_info)
+    buffer.seek(0)
+    with PILImage.open(buffer) as reloaded:
+        assert "prompt" in reloaded.info
+        assert "BundleKSampler" in reloaded.info["prompt"]
+        assert "workflow" in reloaded.info
+        assert reloaded.info["workflow"] == '{"nodes": [1, 2, 3]}'
+
+
+def test_build_png_info_empty_inputs() -> None:
+    """Missing prompt/extra_pnginfo yield an (empty) PngInfo, not a crash."""
+    from comfyui_lukutar_nodes.nodes.checkpoint_bundle import _build_png_info
+
+    png_info = _build_png_info(None, None)
+    assert png_info is not None
+    assert len(png_info.chunks) == 0

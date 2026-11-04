@@ -22,6 +22,7 @@ The weighted prompt engine implements BNK-style token normalization
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Callable
@@ -59,8 +60,10 @@ except ImportError:  # pragma: no cover - exercised only outside runtime
 
 try:
     from PIL import Image  # Pillow from the ComfyUI runtime
+    from PIL.PngImagePlugin import PngInfo
 except ImportError:  # pragma: no cover - exercised only outside runtime
     Image = None  # type: ignore[assignment]
+    PngInfo = None  # type: ignore[assignment]
 
 from ..core.a1111_parameters import build_parameters, get_model_hash_cache
 from ..core.generation_info import (
@@ -1045,8 +1048,10 @@ class BundleKSamplerNode:
     the bundle's ``img`` slot, the first decoded frame is pushed
     through the binary preview channel so it replaces the noise frame
     on the node in both frontend renderers, and every frame is saved
-    as a temp PNG and emitted as the ``executed`` output ui so the
-    picture can be opened/copied/saved from the node's context menu.
+    as a temp PNG (``tmp_<counter>.png``, with the prompt/workflow
+    metadata embedded) and emitted as the ``executed`` output ui so
+    the picture can be opened/copied/saved from the node's context
+    menu and dragged back onto the canvas.
 
     The v2 output section itself stays hidden (the web extension sets
     ``hideOutputImages`` on the node): the preview channel already
@@ -1138,7 +1143,11 @@ class BundleKSamplerNode:
                         "preview and the bundle's img slot.",
                     },
                 ),
-            }
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
         }
 
     RETURN_TYPES = (BUNDLE_TYPE, INFO_TYPE)
@@ -1161,6 +1170,8 @@ class BundleKSamplerNode:
         scheduler: str,
         denoise: float,
         vae_decode: bool,
+        prompt: Any = None,
+        extra_pnginfo: Any = None,
     ) -> dict[str, Any]:
         '''Run the sampler and update bundle and info.
 
@@ -1174,6 +1185,11 @@ class BundleKSamplerNode:
             scheduler: ComfyUI scheduler name.
             denoise: Denoise strength.
             vae_decode: Whether to decode the result to IMAGE.
+            prompt: ComfyUI's hidden PROMPT input (embedded in the temp
+                preview PNGs).
+            extra_pnginfo: ComfyUI's hidden EXTRA_PNGINFO input; its
+                ``workflow`` entry is embedded in the temp preview
+                PNGs.
 
         Returns:
             The OUTPUT_NODE result dict with optional preview ui and
@@ -1263,7 +1279,10 @@ class BundleKSamplerNode:
             # the preview.
             _push_final_preview(pbar, images)
             try:
-                ui["images"] = save_temp_previews(images)
+                ui["images"] = save_temp_previews(
+                    images,
+                    png_info=_build_png_info(prompt, extra_pnginfo),
+                )
             except Exception:  # noqa: BLE001 - preview must not kill sampling
                 logger.exception(
                     "KSampler (Bundle): temp preview save failed; "
@@ -1463,21 +1482,57 @@ class InfoPackNode:
         return (merged,)
 
 
+def _build_png_info(prompt: Any, extra_pnginfo: Any) -> Any:
+    '''Build the PNG metadata chunks for the temp preview files.
+
+    Mirrors the core SaveImage node: the executed prompt graph (JSON)
+    goes into the ``prompt`` tEXt chunk and the frontend workflow
+    (JSON) into ``workflow``, so a temp file can be dragged back onto
+    the canvas and restores the whole workflow.
+
+    Args:
+        prompt: ComfyUI's hidden PROMPT input (may be ``None``).
+        extra_pnginfo: ComfyUI's hidden EXTRA_PNGINFO input; only its
+            ``workflow`` entry is embedded.
+
+    Returns:
+        A populated :class:`PIL.PngImagePlugin.PngInfo`, or ``None``
+        when Pillow is unavailable.
+    '''
+    if PngInfo is None:
+        return None
+    png_info = PngInfo()
+    if isinstance(prompt, dict):
+        png_info.add_text("prompt", json.dumps(prompt))
+    if isinstance(extra_pnginfo, dict):
+        workflow = extra_pnginfo.get("workflow")
+        if workflow is not None:
+            png_info.add_text("workflow", json.dumps(workflow))
+    return png_info
+
+
 def save_temp_previews(
     images: Any,
-    filename_prefix: str = "LukutarBundleKSampler",
+    filename_prefix: str = "tmp",
+    png_info: Any = None,
 ) -> list[dict[str, str]]:
     '''Save IMAGE frames as temp PNGs for the frontend context menu.
 
-    Mirrors the file layout of ComfyUI's own PreviewImage: temp
-    directory, counter-suffixed names, ``type: "temp"`` references.
-    The web extension maps these references to ``/view`` URLs and
-    stores them on ``node.imgs``, which feeds the right-click
+    Files are named ``tmp_<counter>.png`` in the ComfyUI temp
+    directory (``<counter>`` zero-padded to five digits, tracked by
+    :func:`folder_paths.get_save_image_path`).  When ``png_info`` is
+    given, the prompt/workflow metadata chunks are embedded so the
+    files can be dropped back onto the canvas.
+
+    The web extension maps the returned references to ``/view`` URLs
+    and stores them on ``node.imgs``, which feeds the right-click
     Open/Copy/Save Image menu entries.
 
     Args:
         images: ``(B, H, W, 3)`` float [0,1] RGB tensor.
-        filename_prefix: Base file name.
+        filename_prefix: Base file name (without separator).
+        png_info: Optional :class:`PIL.PngImagePlugin.PngInfo` chunks
+            to embed (``prompt``/``workflow``).
 
     Returns:
         List of ``{"filename", "subfolder", "type"}`` ui references.
@@ -1487,23 +1542,23 @@ def save_temp_previews(
     '''
     if folder_paths is None or Image is None or np is None:
         raise RuntimeError("Previews require the ComfyUI runtime.")
-    prefix = filename_prefix + "_temp_"
     full_output_folder, filename, counter, subfolder, _ = (
         folder_paths.get_save_image_path(
-            prefix,
+            filename_prefix,
             folder_paths.get_temp_directory(),
             images.shape[1],
             images.shape[0],
         )
     )
     results: list[dict[str, str]] = []
-    for batch_number, frame in enumerate(images):
+    for _batch_number, frame in enumerate(images):
         arr = 255.0 * frame.cpu().numpy()
         pil_image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-        base = filename.replace("%batch_num%", str(batch_number))
-        file = f"{base}_{counter:05}_.png"
+        file = f"{filename}_{counter:05}.png"
         pil_image.save(
-            os.path.join(full_output_folder, file), compress_level=1
+            os.path.join(full_output_folder, file),
+            compress_level=1,
+            pnginfo=png_info,
         )
         results.append(
             {"filename": file, "subfolder": subfolder, "type": "temp"}
