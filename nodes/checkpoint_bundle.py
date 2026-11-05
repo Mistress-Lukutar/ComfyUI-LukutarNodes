@@ -875,7 +875,7 @@ class CheckpointBundleLoaderNode:
         model: Any,
         clip: Any,
         lora_list: Any,
-    ) -> tuple[list[tuple[str, float]], list[tuple[str, str]]]:
+    ) -> tuple[Any, Any, list[tuple[str, float]], list[tuple[str, str]]]:
         '''Apply every LoRA from the list onto model and CLIP.
 
         Args:
@@ -884,13 +884,14 @@ class CheckpointBundleLoaderNode:
             lora_list: ``(name, weight)`` pairs or ``None``.
 
         Returns:
-            Tuple of (applied ``(name, weight)`` entries, ``(name,
-            hash)`` pairs for the info entity).
+            Tuple of (patched model, patched clip, applied ``(name,
+            weight)`` entries, ``(name, hash)`` pairs for the info
+            entity).
         '''
         applied: list[tuple[str, float]] = []
         hashes: list[tuple[str, str]] = []
         if not lora_list:
-            return applied, hashes
+            return model, clip, applied, hashes
 
         for name, weight in lora_list:
             path = folder_paths.get_full_path_or_raise("loras", name)
@@ -914,7 +915,7 @@ class CheckpointBundleLoaderNode:
             )
             applied.append((name, weight_f))
             hashes.append((name, get_model_hash_cache().hash(path)))
-        return applied, hashes
+        return model, clip, applied, hashes
 
     def load(
         self,
@@ -978,7 +979,7 @@ class CheckpointBundleLoaderNode:
                 "in the 'vae' widget."
             )
 
-        applied, lora_hashes = self._apply_loras(model, clip, lora_list)
+        model, clip, applied, lora_hashes = self._apply_loras(model, clip, lora_list)
 
         clip = clip.clone()
         clip.clip_layer(clip_skip)
