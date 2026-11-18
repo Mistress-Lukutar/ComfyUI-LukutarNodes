@@ -10,8 +10,10 @@ W×H or aspect-scaled to the target's longer side, rounded up to a
 multiple, bbox always contained, cropped mask re-cut/zero-padded);
 **SEGS Label Filter** — assigns per-order labels onto the SEG
 namedtuples and splits SEGS into filtered/remaining by a 1-based
-numeric filter (`1-5, 8`; engine `core/segs_label_filter.py`: parser,
-split, per-segment preview builder); the
+numeric filter (`1-5, 8`, quoted labels `'face'`, empty = nothing
+selected; engine
+`core/segs_label_filter.py`: parser, split, per-segment preview
+builder); the
 `nodes/segs_label_filter.py` OUTPUT_NODE previews one image per
 segment, SEGSPreview-style (SEG cropped_image or input-image crop from
 the `[x1, y1, x2, y2]` crop region, always-on mask-driven alpha with a

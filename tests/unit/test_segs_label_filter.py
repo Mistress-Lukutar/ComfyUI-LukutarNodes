@@ -108,10 +108,10 @@ def _fake_segs(
 # ======================================================================
 
 
-def test_parse_empty_string_returns_none() -> None:
-    """Empty string and whitespace-only strings yield None."""
-    assert parse_index_filter("", 10) is None
-    assert parse_index_filter("   ", 10) is None
+def test_parse_empty_string_selects_nothing() -> None:
+    """Empty and whitespace-only filters select no segments."""
+    assert parse_index_filter("", 10) == set()
+    assert parse_index_filter("   ", 10) == set()
 
 
 def test_parse_comma_separated_indices() -> None:
@@ -192,6 +192,56 @@ def test_parse_range_fully_out_of_range() -> None:
     """'1-3' with count 0 → set() (everything out of range)."""
     result = parse_index_filter("1-3", 0)
     assert result == set()
+
+
+# ======================================================================
+# parse_index_filter label-token tests                                   #
+# ======================================================================
+
+
+def test_parse_label_tokens() -> None:
+    """Quoted tokens select segments by assigned label."""
+    labels = ["face", "body", "face", "bg"]
+    assert parse_index_filter("'face'", 4, labels) == {0, 2}
+    assert parse_index_filter('"bg"', 4, labels) == {3}
+    assert parse_index_filter("1,'face'", 4, labels) == {0, 2}
+
+
+def test_parse_label_token_with_spaces() -> None:
+    """Quotes keep spaces (and commas) inside the label."""
+    labels = ["red car", "x"]
+    assert parse_index_filter("'red car'", 2, labels) == {0}
+
+
+def test_parse_label_token_empty_label() -> None:
+    """'' matches segments with an empty assigned label."""
+    labels = ["", "x", ""]
+    assert parse_index_filter("''", 3, labels) == {0, 2}
+
+
+def test_parse_label_token_case_sensitive() -> None:
+    """Label matching is exact and case-sensitive."""
+    labels = ["body"]
+    assert parse_index_filter("'Body'", 1, labels) == set()
+
+
+def test_parse_label_token_without_labels_skipped() -> None:
+    """Quoted tokens without a label list are skipped with a warning."""
+    assert parse_index_filter("2,'face'", 3) == {1}
+
+
+def test_parse_unclosed_quote_skipped() -> None:
+    """An unclosed quote runs to the end of the text and matches
+    nothing."""
+    labels = ["face"]
+    assert parse_index_filter("1,'face", 1, labels) == {0}
+
+
+def test_parse_mixed_numbers_ranges_labels() -> None:
+    """Numbers, ranges and quoted labels combine into one set."""
+    labels = ["bg", "body", "body", "bg", "body", "hand"]
+    result = parse_index_filter("1,3,'body', 10", 6, labels)
+    assert result == {0, 1, 2, 4}
 
 
 # ======================================================================

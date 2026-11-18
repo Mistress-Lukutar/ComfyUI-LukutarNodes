@@ -5,7 +5,7 @@ Brief:  ComfyUI node that assigns labels to SEGS segments and filters
         (SEGSPreview-style, non-passing darkened).
 Author: Mistress-Lukutar
 Date:   2026-11-18
-Version: v0.4.2
+Version: v0.5.1
 '''
 
 from __future__ import annotations
@@ -127,8 +127,10 @@ class SegsLabelFilterNode:
     '''Assign labels to Impact Pack SEGS segments and filter by index.
 
     Writes label strings onto the SEG namedtuples so they travel
-    downstream.  Segments passing the numeric-index filter are placed
-    in ``filtered_segs``; the rest go into ``remaining_segs``.  The
+    downstream.  Segments passing the filter (numbers, ranges or
+    quoted labels) are placed in ``filtered_segs``; the rest go into
+    ``remaining_segs``.  An empty filter selects nothing — every
+    segment goes to ``remaining_segs``.  The
     preview shows one image per segment (SEGSPreview style): the SEG's
     ``cropped_image`` when the detector provided one, otherwise the
     input image cropped by the segment's crop region.  The non-masked
@@ -148,13 +150,15 @@ class SegsLabelFilterNode:
     frontend context-menu channel without requiring downstream consumers.
 
     Args:
-        image: The SEGS-detected image, used as preview background.
+        image: The SEGS-detected image; the crop source for segments
+            without ``cropped_image``.
         segs: Impact Pack SEGS payload from a detector (e.g. SEGM).
         labels: Comma/newline-separated label per segment in order;
             empty entries are valid positional slots.
-        filter: 1-based index filter like ``"1,2,3\" or \"1-5, 8\";
-            empty string means all segments pass.
-        dim: Darkness of non-passing bbox regions on the preview.
+        filter: 1-based index filter like "1,2,3", "1-5, 8" or
+            "1,3,'face', 10" (quoted tokens match assigned labels
+            exactly); an empty filter selects nothing.
+        font_size: Caption font size (OpenCV font scale).
 
     Returns:
         A dict with ``ui.images`` (preview refs) and ``result``
@@ -209,9 +213,11 @@ class SegsLabelFilterNode:
                     {
                         "default": "",
                         "tooltip": (
-                            "1-based index filter like '1,2,3,4' or '1-5, 8';"
-                            " empty = all segments pass; numbers are the"
-                            " indices shown on the preview"
+                            "1-based index filter like '1,2,3,4' or"
+                            " '1-5, 8'; quoted tokens match labels, e.g."
+                            " \"1,3,'face', 10\" (exact, case-sensitive);"
+                            " an empty filter selects nothing; numbers"
+                            " are the indices shown on the preview"
                         ),
                     },
                 ),
@@ -252,7 +258,8 @@ class SegsLabelFilterNode:
             image: ComfyUI IMAGE batch (B, H, W, 3) [0, 1] RGB.
             segs: Impact Pack SEGS payload shaped ((h, w), [SEG, ...]).
             labels: Comma/newline-separated label string per segment.
-            filter: 1-based numeric index filter string.
+            filter: 1-based numeric index filter string; an empty
+                filter selects nothing.
             font_size: Caption font size (OpenCV font scale).
 
         Returns:
@@ -281,7 +288,7 @@ class SegsLabelFilterNode:
 
         # 3. Parse labels and filter.
         labels_list = parse_labels(labels, len(segments))
-        selected = parse_index_filter(filter, len(segments))
+        selected = parse_index_filter(filter, len(segments), labels_list)
 
         # 4. Assign labels to segments.
         labeled = assign_seg_labels(segments, labels_list)

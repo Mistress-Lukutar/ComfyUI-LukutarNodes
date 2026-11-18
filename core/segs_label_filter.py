@@ -4,7 +4,7 @@ Brief:  SEGS label assignment + numeric-index filter + per-segment
         preview engine.
 Author: Mistress-Lukutar
 Date:   2026-11-18
-Version: v0.4.2
+Version: v0.5.1
 '''
 
 from __future__ import annotations
@@ -30,33 +30,95 @@ MIN_ALPHA = 0.25
 DIM_GRAY = (80, 80, 80)
 
 
-def parse_index_filter(
-    text: str, count: int
-) -> set[int] | None:
-    '''Parse a comma/whitespace-separated index filter into a set.
-
-    Numbers are 1-based; ``0`` is invalid and skipped. Ranges ``A-B``
-    expand to all integers from ``min(A,B)`` through ``max(A,B)``
-    (inclusive), clamped to ``[1, count]``.
+def _split_filter_tokens(text: str) -> list[str]:
+    '''Split a filter string on commas and whitespace, keeping quoted
+    spans (single or double quotes) intact — separators inside quotes
+    are preserved.
 
     Args:
-        text: Filter string such as ``"1,2,3,4\" or \"1-5, 8\".
-        count: Total number of segments (upper bound for indices).
+        text: Raw filter text.
 
     Returns:
-        A set of **0-based** indices that pass the filter, or ``None``
-        when *text* is empty (meaning "no filter").  An empty set means
-        "everything is filtered out".  Never raises.
+        The non-empty tokens, in order; quotes remain part of each
+        quoted token.  An unclosed quote extends to the end of the
+        text.
+    '''
+    tokens: list[str] = []
+    current: list[str] = []
+    quote = ''
+    for ch in text:
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                quote = ''
+        elif ch in '\'"':
+            quote = ch
+            current.append(ch)
+        elif ch.isspace() or ch == ',':
+            if current:
+                tokens.append(''.join(current))
+                current = []
+        else:
+            current.append(ch)
+    if current:
+        tokens.append(''.join(current))
+    return tokens
+
+
+def parse_index_filter(
+    text: str,
+    count: int,
+    labels: list[str] | None = None,
+) -> set[int]:
+    '''Parse a filter string into a set of passing segment indices.
+
+    Tokens are separated by commas and whitespace.  Numbers are
+    1-based; ``0`` is invalid and skipped.  Ranges ``A-B`` expand to
+    all integers from ``min(A,B)`` through ``max(A,B)`` (inclusive),
+    clamped to ``[1, count]``.  A quoted token (``'face'`` or
+    ``"bg"``) selects every segment whose assigned label equals the
+    quoted text exactly (case-sensitive); quotes may contain spaces
+    and commas.  An EMPTY text selects nothing.
+
+    Args:
+        text: Filter string such as "1,2,3,4", "1-5, 8" or
+            "1,3,'face', 10".
+        count: Total number of segments (upper bound for indices).
+        labels: Assigned label per segment (len == count); required to
+            resolve quoted tokens.  When None, quoted tokens are
+            skipped with a warning.
+
+    Returns:
+        A set of **0-based** indices that pass the filter.  An empty
+        *text* yields an empty set — nothing is selected.  Never
+        raises.
     '''
     stripped = text.strip()
     if not stripped:
-        return None
+        return set()
 
-    tokens = re.split(r'[,\s]+', stripped)
     result: set[int] = set()
-
-    for token in tokens:
+    for token in _split_filter_tokens(stripped):
         if not token:
+            continue
+        # Quoted token: match segments by assigned label.
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in '\'"':
+            quoted = token[1:-1]
+            if labels is None:
+                logger.warning(
+                    "Label token %r ignored: no labels to match against",
+                    token,
+                )
+                continue
+            matched = [
+                i
+                for i, label in enumerate(labels[:count])
+                if label == quoted
+            ]
+            if not matched:
+                logger.info("Label %r matches no segment, skipping", quoted)
+                continue
+            result.update(matched)
             continue
         # Try range form A-B first.
         if '-' in token:

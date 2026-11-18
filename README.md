@@ -307,10 +307,14 @@ captions show ``N: label`` (or just ``N`` for unlabeled segments), and the
 same numbers are used by the filter. Filtering never reorders segments.
 
 **Filter grammar.** Comma/whitespace-separated tokens: single numbers
-(`3`) or inclusive ranges (`1-5`; reversed `5-2` works). Numbers outside
-1..count are skipped with a warning, ranges are clamped, invalid tokens
-are skipped with a warning. Empty filter = everything passes; a non-empty
-filter with no valid tokens = nothing passes.
+(`3`), inclusive ranges (`1-5`; reversed `5-2` works), and quoted
+labels (`'face'` or `"bg"` — matched exactly, case-sensitive, against
+the assigned labels; quotes may contain spaces and commas), mixed in
+any order, e.g. `"1,3,'face', 10"`. Numbers outside 1..count are
+skipped with a warning, ranges are clamped, invalid tokens are skipped
+with a warning. An empty filter selects nothing — every segment goes
+to `remaining_segs`; a non-empty filter with no valid tokens does the
+same.
 
 **Darkening.** Segments that do not pass the filter have their whole
 preview darkened to 40% brightness (fixed factor 0.6, not configurable)
@@ -345,15 +349,15 @@ fully opaque.
 | image | IMAGE | — | Image the SEGS were detected on; the crop source for segments without `cropped_image`. |
 | segs | SEGS | — | Segments from an Impact Pack detector (e.g. SEGM Detector (SEGS)). |
 | labels | STRING | "" | Comma/newline-separated label per segment, in order; empty entries are valid positional slots. |
-| filter | STRING | "" | 1-based index filter like `"1,2,3,4"` or `"1-5, 8"`; empty = all segments pass. |
+| filter | STRING | "" | 1-based index filter like `"1,2,3,4"`, `"1-5, 8"` or `"1,3,'face', 10"` (quoted tokens match assigned labels exactly); an empty filter selects nothing. |
 | font_size | FLOAT | 0.5 | Caption font size (OpenCV font scale). |
 
 #### Outputs
 
 | Name | Type | Description |
 |------|------|-------------|
-| filtered_segs | SEGS | Segments whose index is in the filter, with labels assigned. |
-| remaining_segs | SEGS | All other segments; `((h, w), [])` when everything passes. |
+| filtered_segs | SEGS | Segments whose index or label is in the filter, with labels assigned; `((h, w), [])` when the filter is empty or matches nothing. |
+| remaining_segs | SEGS | All other segments; `((h, w), [])` when every segment is selected. |
 
 #### Batch behaviour
 

@@ -711,19 +711,20 @@ def main() -> None:
             "empty SEGS preview shows the plain frame"
         )
 
-    # No filter: all segments pass.
+    # Empty filter: nothing is selected — everything goes to remaining.
     segs_6 = _fake_segs(count=6)
     res_all = node.run(image, segs_6, labels="a,b", filter="")
     filtered_all = res_all["result"][0]
-    assert len(filtered_all[1]) == 6
-    all_labels = [s.label for s in filtered_all[1]]
+    assert len(filtered_all[1]) == 0
+    remaining_all = res_all["result"][1]
+    assert len(remaining_all[1]) == 6
+    all_labels = [s.label for s in remaining_all[1]]
     assert all_labels == ["a", "b", "", "", "", ""], (
-        f"no-filter labels mismatch: {all_labels}"
+        f"empty-filter labels mismatch: {all_labels}"
     )
-    assert len(res_all["result"][1][1]) == 0
     if preview_ok:
         assert len(res_all["ui"]["images"]) == 6, (
-            "no-filter preview shows all segments"
+            "empty-filter preview shows all segments"
         )
 
     # Filter all-invalid: nothing passes.
@@ -731,6 +732,21 @@ def main() -> None:
     res_none = node.run(image, segs_6b, labels="", filter="zzz")
     assert len(res_none["result"][0][1]) == 0
     assert len(res_none["result"][1][1]) == 6
+
+    # Label-based filter: quoted tokens match the assigned labels.
+    segs_lbl = _fake_segs(count=6)
+    res_label = node.run(
+        image, segs_lbl, labels="bg,body,body,bg,body,hand", filter="'body'"
+    )
+    label_filtered = res_label["result"][0][1]
+    assert [s.label for s in label_filtered] == ["body", "body", "body"], (
+        f"label filter mismatch: {[s.label for s in label_filtered]}"
+    )
+    assert len(res_label["result"][1][1]) == 3
+    if preview_ok:
+        # Previews always cover the FULL segment list (non-passing
+        # segments are darkened, not removed).
+        assert len(res_label["ui"]["images"]) == 6
 
     # Prompt annotation nodes.
     assert "PromptAnnotate" in mappings, "PromptAnnotate not registered"
