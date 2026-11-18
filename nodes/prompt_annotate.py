@@ -2,8 +2,8 @@
 File:   prompt_annotate.py
 Brief:  ComfyUI nodes for region-wise prompt annotation markup.
 Author: Mistress-Lukutar
-Date:   2026-08-28
-Version: v0.8.1
+Date:   2026-11-11
+Version: v0.9.0
 '''
 
 from __future__ import annotations
@@ -55,8 +55,9 @@ class PromptAnnotateNode:
     label set is free-form and should match the classifier's; labels
     are simply typed into the markup, there is no fixed list). Text
     outside tags is the unmarked common part. The node outputs the
-    annotations object plus the tag-free prompt, so the same text drives
-    both the base generation and the per-region passes.
+    annotations object, the tag-free prompt, and the original raw text,
+    so the same text drives both the base generation and the per-region
+    passes.
     '''
 
     CATEGORY = "Lukutar/Prompt"
@@ -80,18 +81,18 @@ class PromptAnnotateNode:
             },
         }
 
-    RETURN_TYPES = ("ANNOTATIONS", "STRING")
-    RETURN_NAMES = ("annotations", "clean_prompt")
+    RETURN_TYPES = ("ANNOTATIONS", "STRING", "STRING")
+    RETURN_NAMES = ("annotations", "clean_prompt", "raw")
     FUNCTION = "annotate"
 
-    def annotate(self, text: str) -> tuple[AnnotatedPrompt, str]:
-        '''Parse the markup and emit annotations plus the clean prompt.
+    def annotate(self, text: str) -> tuple[AnnotatedPrompt, str, str]:
+        '''Parse the markup and emit annotations, clean text, and raw text.
 
         Args:
             text: Raw prompt with tag markup.
 
         Returns:
-            Tuple of (annotations object, tag-free prompt).
+            Tuple of (annotations object, tag-free prompt, original text).
         '''
         annotated = parse_annotated_prompt(text)
         logger.info(
@@ -99,7 +100,7 @@ class PromptAnnotateNode:
             len(annotated.spans),
             ", ".join(annotated.labels) or "none",
         )
-        return (annotated, annotated.clean)
+        return (annotated, annotated.clean, text)
 
 
 class AnnotationsWildcardNode:

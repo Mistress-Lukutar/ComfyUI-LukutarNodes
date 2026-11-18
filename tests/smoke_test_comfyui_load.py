@@ -2,8 +2,8 @@
 File:   smoke_test_comfyui_load.py
 Brief:  Simulates ComfyUI custom node loading without launching the server.
 Author: Mistress-Lukutar
-Date:   2026-08-28
-Version: v0.7.3
+Date:   2026-11-11
+Version: v0.7.4
 
 Run with ComfyUI's own python (no server launch required):
 
@@ -17,7 +17,7 @@ import collections
 import contextlib
 import importlib.util
 import json
-import os
+import os  # noqa: F401 - used in A1111ModelInfo section below
 import sys
 import tempfile
 from pathlib import Path
@@ -742,10 +742,12 @@ def main() -> None:
     assert "PromptAnnotate" in pack.NODE_DISPLAY_NAME_MAPPINGS  # type: ignore[attr-defined]
 
     annotate_node = mappings["PromptAnnotate"]()
-    annotations, clean_prompt = annotate_node.annotate(
+    raw_prompt = (
         "masterpiece, |body:1girl, thin|, |face:blue eyes, smirk|, "
-        "|body,hair:red hair|, |body:stands|, |background:outdoors, park|",
+        "|body,hair:red hair|, |body:stands|, |background:outdoors, park|"
     )
+    annotations, clean_prompt, raw = annotate_node.annotate(raw_prompt)
+    assert raw == raw_prompt
     assert clean_prompt == (
         "masterpiece, 1girl, thin, blue eyes, smirk, red hair, stands, "
         "outdoors, park"

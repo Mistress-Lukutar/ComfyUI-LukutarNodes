@@ -2,8 +2,8 @@
 File:   test_prompt_annotator.py
 Brief:  Unit tests for the inline prompt annotation markup engine.
 Author: Mistress-Lukutar
-Date:   2026-08-28
-Version: v0.7.1
+Date:   2026-11-11
+Version: v0.7.2
 '''
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from comfyui_lukutar_nodes.core.prompt_annotator import (
 )
 from comfyui_lukutar_nodes.nodes.prompt_annotate import (
     AnnotationsToStringNode,
+    PromptAnnotateNode,
 )
 
 _EXAMPLE = (
@@ -33,6 +34,17 @@ _EXAMPLE_CLEAN = (
     "masterpiece, 1girl, thin, blue eyes, smirk, red hair, stands, "
     "outdoors, park"
 )
+
+
+def test_prompt_annotate_node_preserves_raw_text() -> None:
+    raw_text = "\nmasterpiece,  |face:blue eyes, smirk|  \n"
+
+    _, clean_prompt, raw = PromptAnnotateNode().annotate(raw_text)
+
+    assert PromptAnnotateNode.RETURN_TYPES == ("ANNOTATIONS", "STRING", "STRING")
+    assert PromptAnnotateNode.RETURN_NAMES == ("annotations", "clean_prompt", "raw")
+    assert clean_prompt != raw_text
+    assert raw == raw_text
 
 
 def test_example_clean_text_and_span_offsets() -> None:

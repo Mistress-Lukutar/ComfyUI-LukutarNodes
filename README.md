@@ -384,6 +384,8 @@ masterpiece, |body:1girl, thin|, |face:blue eyes, smirk|, |body,hair:red hair|, 
 - The `clean_prompt` output strips all markup:
   `masterpiece, 1girl, thin, blue eyes, smirk, red hair, stands,
   outdoors, park` — feed it to the base generation.
+- The `raw` output returns the exact text-field contents, including all
+  markup and whitespace, without cleanup or normalization.
 - Empty tags (`|face:|`) are dropped with their dangling separators.
 - `|` cannot appear in the prompt text itself; malformed tags fail the
   node with the offending position.
@@ -416,6 +418,7 @@ can be typed by hand.
 |------|------|-------------|
 | annotations | ANNOTATIONS | Parsed spans; consumed by the nodes below. |
 | clean_prompt | STRING | The same prompt with all markup removed. |
+| raw | STRING | Exact unmodified text-field contents, including markup and whitespace. |
 
 ### Annotations to Wildcard (LAB)
 
