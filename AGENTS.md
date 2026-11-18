@@ -7,7 +7,19 @@ frequency separation; **SEGS BBox Overlay** — draws Impact Pack
 SEGS detections on an image, YOLO-demo style; **SEGS Set Crop Size** —
 refits each segment's crop region to an absolute target size (exact
 W×H or aspect-scaled to the target's longer side, rounded up to a
-multiple, bbox always contained, cropped mask re-cut/zero-padded); and
+multiple, bbox always contained, cropped mask re-cut/zero-padded);
+**SEGS Label Filter** — assigns per-order labels onto the SEG
+namedtuples and splits SEGS into filtered/remaining by a 1-based
+numeric filter (`1-5, 8`; engine `core/segs_label_filter.py`: parser,
+split, per-segment preview builder); the
+`nodes/segs_label_filter.py` OUTPUT_NODE previews one image per
+segment, SEGSPreview-style (SEG cropped_image or input-image crop from
+the `[x1, y1, x2, y2]` crop region, always-on mask-driven alpha with a
+fixed 0.25 floor, fixed 0.6 darkening for non-passing, the segment
+label plate at the top-left and the 1-based number plate at the
+bottom-right of each preview (one fixed font size, explicit
+`font_size`, no bbox rectangles — via `draw_corner_caption` in
+`core/detection_renderer.py`); and
 the prompt
 annotation set — **Prompt Annotate** (inline `|label: text|` markup in
 one prompt, outputs ANNOTATIONS + clean STRING), **Annotations to

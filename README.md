@@ -16,6 +16,9 @@ anywhere) and thin tensor-conversion helpers under `utils/`.
   (`Lukutar/Image`).
 - **SEGS Set Crop Size** — refit Impact Pack SEGS crop regions to an
   absolute target size, e.g. 512×512 (`Lukutar/Image`).
+- **SEGS Label Filter** — assigns per-segment labels by order and splits
+  SEGS into filtered/remaining by a 1-based index filter, with one
+  SEGSPreview-style preview image per segment (`Lukutar/Image`).
 - **Prompt Annotate** — inline `|label: text|` region markup in one
   prompt (`Lukutar/Prompt`).
 - **Annotations to Wildcard (LAB)** — annotations → Impact Pack `[LAB]`
@@ -281,6 +284,82 @@ the image size (with a warning).
 | Name | Type | Description |
 |------|------|-------------|
 | segs | SEGS | SEGS with refitted crop regions; bboxes and mask content unchanged. |
+
+### SEGS Label Filter
+
+Assigns per-segment labels to [Impact Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack)
+SEGS segments and splits them into two outputs — passing and remaining —
+based on a numeric index filter (`Lukutar/Image`).
+
+Sits between a detector (e.g. `SEGM Detector (SEGS)`) and the rest of
+the graph when you need to tell segments apart and route a subset onward.
+Labels are entered as a comma/newline-separated list — the Nth label is
+assigned to the Nth segment, e.g. ``bg,body,body,bg,body,hand``.
+
+**Labels.** Each label is written onto the segment's `label` field (SEG
+namedtuple `_replace`), so it travels downstream to nodes that read it.
+Missing labels → empty string; extra labels are ignored; empty entries
+are valid positional slots (`bg,,body`); inner spaces preserved (per-label
+trim). Empty input clears nothing — every segment simply gets `""`.
+
+**Numbering.** 1-based, counted over the FULL input list; the preview
+captions show ``N: label`` (or just ``N`` for unlabeled segments), and the
+same numbers are used by the filter. Filtering never reorders segments.
+
+**Filter grammar.** Comma/whitespace-separated tokens: single numbers
+(`3`) or inclusive ranges (`1-5`; reversed `5-2` works). Numbers outside
+1..count are skipped with a warning, ranges are clamped, invalid tokens
+are skipped with a warning. Empty filter = everything passes; a non-empty
+filter with no valid tokens = nothing passes.
+
+**Darkening.** Segments that do not pass the filter have their whole
+preview darkened to 40% brightness (fixed factor 0.6, not configurable)
+and get a dark gray caption plate; passing segments keep normal
+brightness and stable per-label caption colors from the built-in palette
+(same label = same color).
+
+**Preview.** `OUTPUT_NODE` — one preview image per segment, SEGSPreview
+style: the segment's `cropped_image` when the detector provided one,
+otherwise the input image cropped by the segment's crop region (an
+`[x1, y1, x2, y2]` rect, like Impact Pack; segment coordinates are
+rescaled proportionally when SEGS and image resolutions differ). No
+bbox rectangle is drawn — each preview carries the segment label as a
+caption plate in its top-left corner and its 1-based number as a plate
+in the bottom-right corner; both use one fixed font size (every segment
+gets the same font), set by `font_size`. The images are shown
+inside the node (temp PNGs, prefix `tmp_segs_labels_`).
+Segments without a usable crop produce no preview. A preview failure
+never fails execution (the SEGS outputs are still produced).
+
+**Alpha.** Always on, like Impact Pack's SEGS Preview alpha mode: the
+non-masked part of every preview is transparent — the alpha channel
+comes from the segment's cropped mask (resized to the crop size,
+batched masks combined by maximum) with a fixed `0.25` alpha floor. The
+caption plate stays opaque. Segments without a usable mask preview
+fully opaque.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| image | IMAGE | — | Image the SEGS were detected on; the crop source for segments without `cropped_image`. |
+| segs | SEGS | — | Segments from an Impact Pack detector (e.g. SEGM Detector (SEGS)). |
+| labels | STRING | "" | Comma/newline-separated label per segment, in order; empty entries are valid positional slots. |
+| filter | STRING | "" | 1-based index filter like `"1,2,3,4"` or `"1-5, 8"`; empty = all segments pass. |
+| font_size | FLOAT | 0.5 | Caption font size (OpenCV font scale). |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| filtered_segs | SEGS | Segments whose index is in the filter, with labels assigned. |
+| remaining_segs | SEGS | All other segments; `((h, w), [])` when everything passes. |
+
+#### Batch behaviour
+
+- The filter and labels apply to every frame in the image batch; when a SEG has no `cropped_image`, its crop is taken from the first batch frame.
+- One preview image is produced per segment (not per batch frame).
+- Empty SEGS pass through unchanged (both outputs are the input payload) and the preview shows the plain input frame(s).
 
 ### Prompt Annotate
 

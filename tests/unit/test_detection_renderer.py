@@ -18,6 +18,7 @@ from comfyui_lukutar_nodes.core.detection_renderer import (
     Detection,
     DetectionRenderer,
     DetectionRenderError,
+    draw_corner_caption,
     format_caption,
     scale_detections,
 )
@@ -240,3 +241,143 @@ def test_scale_detections_rejects_non_positive_size() -> None:
     detection = _box_detection()
     with pytest.raises(DetectionRenderError):
         scale_detections([detection], (0, 0), (200, 300))
+
+
+# ======================================================================
+# Tests for Detection.color and Detection.dim fields                     #
+# ======================================================================
+
+
+def test_color_override() -> None:
+    '''A Detection with explicit color draws that exact color on the box.'''
+    frame = _black_frame()
+    detection = Detection(
+        bbox=(10.0, 10.0, 60.0, 40.0),
+        label="x",
+        color=(10, 20, 30),
+    )
+    result = DetectionRenderer().render(frame, [detection])
+    # A pixel on the box border (top edge) must carry the override color.
+    assert tuple(result[10, 35]) == (10, 20, 30)
+
+
+def test_dim_darkens_region() -> None:
+    '''A Detection with dim > 0 darkens the interior toward black.'''
+    frame = np.full((64, 64, 3), 100, dtype=np.uint8)
+    detection = Detection(
+        bbox=(10.0, 10.0, 40.0, 40.0),
+        label="x",
+        dim=0.65,
+        color=(255, 0, 0),
+    )
+    result = DetectionRenderer().render(frame, [detection])
+    # Interior pixel should be darkened: 100 * (1 - 0.65) ≈ 35 (±2).
+    interior = result[25, 25]
+    expected_interior = round(100 * (1.0 - 0.65))
+    for ch in range(3):
+        assert abs(int(interior[ch]) - expected_interior) <= 2, (
+            f"channel {ch}: got {int(interior[ch])}, expected ~{expected_interior}"
+        )
+    # Border pixel should carry the bright color.
+    assert tuple(result[10, 25]) == (255, 0, 0)
+
+
+def test_dim_clamps_extremes() -> None:
+    '''dim=1.5 → interior fully black; dim=-1 → interior unchanged.'''
+    frame = np.full((64, 64, 3), 100, dtype=np.uint8)
+
+    # dim=1.5 clamped to 1.0 → all channels ≈ 0.
+    detection_full = Detection(
+        bbox=(10.0, 10.0, 40.0, 40.0),
+        label="x",
+        dim=1.5,
+        color=(255, 0, 0),
+    )
+    result_full = DetectionRenderer().render(frame.copy(), [detection_full])
+    interior = result_full[25, 25]
+    for ch in range(3):
+        assert int(interior[ch]) == 0, (
+            f"dim=1.5 channel {ch}: expected 0, got {int(interior[ch])}"
+        )
+
+    # dim=-1 clamped to 0.0 → interior unchanged at 100.
+    detection_neg = Detection(
+        bbox=(10.0, 10.0, 40.0, 40.0),
+        label="x",
+        dim=-1,
+        color=(255, 0, 0),
+    )
+    result_neg = DetectionRenderer().render(frame.copy(), [detection_neg])
+    interior_neg = result_neg[25, 25]
+    for ch in range(3):
+        assert int(interior_neg[ch]) == 100, (
+            f"dim=-1 channel {ch}: expected 100, got {int(interior_neg[ch])}"
+        )
+
+
+def test_color_override_with_dim() -> None:
+    '''Both color and dim together — interior darkened AND border colored.'''
+    frame = np.full((64, 64, 3), 100, dtype=np.uint8)
+    detection = Detection(
+        bbox=(10.0, 10.0, 40.0, 40.0),
+        label="x",
+        dim=0.5,
+        color=(0, 255, 0),
+    )
+    result = DetectionRenderer().render(frame, [detection])
+    # Border pixel carries the override green.
+    assert tuple(result[10, 25]) == (0, 255, 0)
+    # Interior darkened: 100 * (1 - 0.5) = 50 (±2).
+    interior = result[25, 25]
+    expected_interior = round(100 * (1.0 - 0.5))
+    for ch in range(3):
+        assert abs(int(interior[ch]) - expected_interior) <= 2, (
+            f"channel {ch}: got {int(interior[ch])}, expected ~{expected_interior}"
+        )
+
+
+def test_draw_corner_caption_plate_at_top_left() -> None:
+    """Corner caption draws a filled plate at the top-left corner."""
+    canvas = np.zeros((32, 48, 3), dtype=np.uint8)
+    draw_corner_caption(canvas, "x", (255, 0, 0), font_size=0.5)
+    # Plate fill at the very corner.
+    assert tuple(int(v) for v in canvas[2, 2]) == (255, 0, 0)
+
+
+def test_draw_corner_caption_rgba_stays_opaque() -> None:
+    """On an RGBA canvas the plate alpha stays opaque."""
+    canvas = np.zeros((32, 48, 4), dtype=np.uint8)
+    draw_corner_caption(canvas, "x", (255, 0, 0))
+    assert int(canvas[2, 2, 0]) == 255
+    assert int(canvas[2, 2, 3]) == 255
+
+
+def test_draw_corner_caption_rejects_bad_scale() -> None:
+    """Non-positive font_size raises ValueError."""
+    canvas = np.zeros((32, 48, 3), dtype=np.uint8)
+    with pytest.raises(ValueError, match="font_size must be positive"):
+        draw_corner_caption(canvas, "x", (255, 0, 0), font_size=0.0)
+
+
+def test_draw_corner_caption_rejects_float_canvas() -> None:
+    """Non-uint8 canvas raises ValueError (cv2.putText needs 8-bit)."""
+    canvas = np.zeros((32, 48, 3), dtype=np.float32)
+    with pytest.raises(ValueError, match="canvas must be uint8"):
+        draw_corner_caption(canvas, "x", (255, 0, 0))
+
+
+def test_draw_corner_caption_bottom_right() -> None:
+    """corner='bottom-right' anchors the plate at the opposite corner."""
+    canvas = np.zeros((32, 48, 3), dtype=np.uint8)
+    draw_corner_caption(canvas, "1", (255, 0, 0), corner="bottom-right")
+    # Plate fill at the very bottom-right corner.
+    assert tuple(int(v) for v in canvas[29, 45]) == (255, 0, 0)
+    # The top-left corner stays untouched.
+    assert int(canvas[2, 2, 0]) == 0
+
+
+def test_draw_corner_caption_rejects_bad_corner() -> None:
+    """Unknown corner raises ValueError."""
+    canvas = np.zeros((32, 48, 3), dtype=np.uint8)
+    with pytest.raises(ValueError, match="Unknown corner"):
+        draw_corner_caption(canvas, "x", (255, 0, 0), corner="middle")

@@ -82,8 +82,16 @@ def _check_image_tensor(tensor: torch.Tensor, expected: torch.Tensor) -> None:
     assert float(tensor.min()) >= 0.0 and float(tensor.max()) <= 1.0
 
 
-def _fake_segs(height: int = 72, width: int = 96) -> tuple:
-    '''Build a SEGS payload shaped like SEGM Detector (SEGS) output.'''
+def _fake_segs(
+    height: int = 72, width: int = 96, count: int = 1
+) -> tuple:
+    '''Build a SEGS payload shaped like SEGM Detector (SEGS) output.
+
+    Args:
+        height: Canvas height.
+        width: Canvas width.
+        count: Number of identical segments to produce (default 1).
+    '''
     seg_type = collections.namedtuple(
         "SEG",
         [
@@ -98,16 +106,20 @@ def _fake_segs(height: int = 72, width: int = 96) -> tuple:
     )
     mask = np.zeros((48, 48), dtype=np.float32)
     mask[8:40, 8:40] = 1.0
-    seg = seg_type(
-        cropped_image=None,
-        cropped_mask=mask,
-        confidence=np.array([0.9124], dtype=np.float32),
-        crop_region=[8, 8, 56, 56],
-        bbox=[16.0, 16.0, 48.0, 48.0],
-        label="face",
-        control_net_wrapper=None,
-    )
-    return (height, width), [seg]
+    segs_list: list = []
+    for _i in range(count):
+        segs_list.append(
+            seg_type(
+                cropped_image=None,
+                cropped_mask=mask.copy(),
+                confidence=np.array([0.9124], dtype=np.float32),
+                crop_region=[8, 8, 56, 56],
+                bbox=[16.0, 16.0, 48.0, 48.0],
+                label="face",
+                control_net_wrapper=None,
+            )
+        )
+    return (height, width), segs_list
 
 
 def _validate_variables_prompt(mappings: dict[str, type]) -> None:
@@ -602,6 +614,123 @@ def main() -> None:
     empty_segs = ((0, 0), [])
     (same_segs,) = fit_node.fit(empty_segs, 64, 64)
     assert same_segs is empty_segs
+
+    # --- SegsLabelFilter: labels + numeric filter + OUTPUT_NODE preview ---
+
+    assert "SegsLabelFilter" in mappings, (
+        "SegsLabelFilter not registered"
+    )
+    display_name = getattr(
+        pack, "NODE_DISPLAY_NAME_MAPPINGS", {}
+    ).get("SegsLabelFilter")
+    assert display_name == "SEGS Label Filter", (
+        f"unexpected display name: {display_name!r}"
+    )
+
+    # The submodule is registered by load_pack() via nodes/__init__.py;
+    # fetch it from sys.modules (importlib has a local import further
+    # down in main(), so import_module() would raise UnboundLocalError).
+    node_mod = sys.modules[
+        "custom_nodes.ComfyUI-LukutarNodes.nodes.segs_label_filter"
+    ]
+    node = node_mod.SegsLabelFilterNode()
+    assert node.OUTPUT_NODE is True
+    assert node.RETURN_TYPES == ("SEGS", "SEGS")
+    assert node.RETURN_NAMES == ("filtered_segs", "remaining_segs")
+
+    # Patch the module globals so _save_temp_previews can write temp PNGs.
+    preview_ok = False
+    if COMFYUI_ROOT.exists():
+        sys.path.insert(0, str(COMFYUI_ROOT))
+        try:
+            import folder_paths as _fp
+            from PIL import Image as _PilImage
+
+            node_mod.folder_paths = _fp
+            node_mod.Image = _PilImage
+            preview_ok = True
+        except ImportError:
+            pass
+        finally:
+            sys.path.remove(str(COMFYUI_ROOT))
+
+    # Build image tensor matching the SEGS canvas size.
+    image = torch.zeros((1, 72, 96, 3), dtype=torch.float32) + 0.5
+
+    segs = _fake_segs(count=6)
+    res = node.run(
+        image, segs, labels="bg,body,body,bg,body,hand", filter="1-3, 5"
+    )
+    # -- result[0] filtered: segments 1,2,3,5 (1-based) with applied
+    # labels bg/body/body/body --
+    filtered_segs = res["result"][0]
+    assert len(filtered_segs[1]) == 4, (
+        f"expected 4 filtered segs, got {len(filtered_segs[1])}"
+    )
+    filtered_labels = [s.label for s in filtered_segs[1]]
+    assert filtered_labels == ["bg", "body", "body", "body"], (
+        f"filtered labels mismatch: {filtered_labels}"
+    )
+    # -- result[1] remaining: segments 4,6 (1-based) with labels bg,hand --
+    remaining_segs = res["result"][1]
+    assert len(remaining_segs[1]) == 2, (
+        f"expected 2 remaining segs, got {len(remaining_segs[1])}"
+    )
+    remaining_labels = [s.label for s in remaining_segs[1]]
+    assert remaining_labels == ["bg", "hand"], (
+        f"remaining labels mismatch: {remaining_labels}"
+    )
+    # -- outer size preserved --
+    assert filtered_segs[0] == (72, 96)
+    assert remaining_segs[0] == (72, 96)
+    # -- original segs unchanged (_replace produces copies) --
+    assert segs[1][0].label == "face"
+
+    # -- preview output: one image per segment --
+    if preview_ok:
+        ui_imgs = res["ui"]["images"]
+        assert len(ui_imgs) == 6, (
+            f"expected 6 segment previews, got {len(ui_imgs)}"
+        )
+        for entry in ui_imgs:
+            assert entry["type"] == "temp"
+            assert entry["filename"].startswith("tmp_segs_labels")
+            full = os.path.join(
+                _fp.get_temp_directory(), entry["subfolder"], entry["filename"]
+            )
+            assert os.path.exists(full), f"preview file missing: {full}"
+    else:
+        assert res["ui"]["images"] == []
+
+    # Empty SEGS: both outputs ARE the input object.
+    empty_input_segs = ((0, 0), [])
+    res_empty = node.run(image, empty_input_segs, labels="x", filter="1")
+    assert res_empty["result"] == (empty_input_segs, empty_input_segs)
+    if preview_ok:
+        assert len(res_empty["ui"]["images"]) == 1, (
+            "empty SEGS preview shows the plain frame"
+        )
+
+    # No filter: all segments pass.
+    segs_6 = _fake_segs(count=6)
+    res_all = node.run(image, segs_6, labels="a,b", filter="")
+    filtered_all = res_all["result"][0]
+    assert len(filtered_all[1]) == 6
+    all_labels = [s.label for s in filtered_all[1]]
+    assert all_labels == ["a", "b", "", "", "", ""], (
+        f"no-filter labels mismatch: {all_labels}"
+    )
+    assert len(res_all["result"][1][1]) == 0
+    if preview_ok:
+        assert len(res_all["ui"]["images"]) == 6, (
+            "no-filter preview shows all segments"
+        )
+
+    # Filter all-invalid: nothing passes.
+    segs_6b = _fake_segs(count=6)
+    res_none = node.run(image, segs_6b, labels="", filter="zzz")
+    assert len(res_none["result"][0][1]) == 0
+    assert len(res_none["result"][1][1]) == 6
 
     # Prompt annotation nodes.
     assert "PromptAnnotate" in mappings, "PromptAnnotate not registered"

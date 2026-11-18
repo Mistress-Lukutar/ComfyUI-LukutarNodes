@@ -2,8 +2,8 @@
 File:   detection_renderer.py
 Brief:  YOLO-style bbox/caption/mask overlay engine (numpy/OpenCV, RGB).
 Author: Mistress-Lukutar
-Date:   2026-08-28
-Version: v0.3.1
+Date:   2026-11-18
+Version: v0.5.1
 '''
 
 from __future__ import annotations
@@ -53,6 +53,13 @@ _FONT = cv2.FONT_HERSHEY_SIMPLEX
 #: Luminance threshold above which caption text flips to black.
 _TEXT_FLIP_LUMA = 150.0
 
+#: Top-left corner position for :func:`draw_corner_caption`.
+CORNER_TOP_LEFT = "top-left"
+#: Bottom-right corner position for :func:`draw_corner_caption`.
+CORNER_BOTTOM_RIGHT = "bottom-right"
+#: Supported corner positions.
+_CORNERS: tuple[str, ...] = (CORNER_TOP_LEFT, CORNER_BOTTOM_RIGHT)
+
 
 class DetectionRenderError(Exception):
     '''Base exception for detection overlay failures.'''
@@ -69,6 +76,10 @@ class Detection:
         mask: Optional (H, W) mask in [0, 1] to tint, sized to the crop
             region it came from.
         mask_origin: (x, y) top-left corner of `mask` in frame pixels.
+        color: Per-detection RGB color override for box+caption+mask;
+            None falls back to the palette/single-color logic.
+        dim: Darken the bbox-region content toward black by this factor
+            before boxes/captions are drawn (0.0 = no effect).
     '''
 
     bbox: tuple[float, float, float, float]
@@ -76,6 +87,8 @@ class Detection:
     confidence: float | None = None
     mask: np.ndarray | None = None
     mask_origin: tuple[int, int] = (0, 0)
+    color: tuple[int, int, int] | None = None
+    dim: float = 0.0
 
 
 def format_caption(
@@ -189,28 +202,46 @@ class DetectionRenderer:
         '''Return a copy of `frame` with the detections drawn on top.
 
         Args:
-            frame: HWC RGB image, uint8 or float32 [0, 255].
+            frame: HWC RGB or RGBA image, uint8 or float32 [0, 255];
+                box/caption drawing keeps RGBA canvases opaque.
             detections: Detections with absolute frame coordinates.
 
         Returns:
-            Annotated HWC RGB uint8 image of the same resolution.
+            Annotated HWC RGB(A) uint8 image of the same resolution.
         '''
         height, width = frame.shape[:2]
         # cv2 draws only on interleaved C-layout arrays; frames derived
         # from permuted (VAE-decoded) tensors arrive channel-planar.
         canvas = np.array(frame, dtype=np.float32, order="C", copy=True)
+        channels = canvas.shape[2]
         colors = self._label_colors(detections)
 
         if self._draw_masks and self._mask_alpha > 0.0:
             for detection in detections:
+                color = (
+                    detection.color
+                    if detection.color is not None
+                    else colors[detection.label]
+                )
                 self._blend_mask(
                     canvas,
                     detection,
-                    colors[detection.label],
+                    _match_channels(color, channels),
                     self._mask_alpha,
                     width,
                     height,
                 )
+
+        # Dim pass: darken non-passing bbox regions toward black.
+        for detection in detections:
+            if detection.dim <= 0.0:
+                continue
+            dim_eff = min(max(detection.dim, 0.0), 1.0)
+            clipped = self._clip_bbox(detection.bbox, width, height)
+            if clipped is None:
+                continue
+            ix1, iy1, ix2, iy2 = clipped
+            canvas[iy1:iy2 + 1, ix1:ix2 + 1] *= (1.0 - dim_eff)
 
         canvas = np.clip(np.rint(canvas), 0.0, 255.0).astype(np.uint8)
         box_thickness = (
@@ -222,11 +253,21 @@ class DetectionRenderer:
         text_thickness = max(1, round(font_size))
 
         for detection in detections:
-            color = colors[detection.label]
+            color = (
+                detection.color
+                if detection.color is not None
+                else colors[detection.label]
+            )
             clipped = self._clip_bbox(detection.bbox, width, height)
             if clipped is None:
                 continue
-            cv2.rectangle(canvas, clipped[:2], clipped[2:], color, box_thickness)
+            cv2.rectangle(
+                canvas,
+                clipped[:2],
+                clipped[2:],
+                _match_channels(color, channels),
+                box_thickness,
+            )
             caption = format_caption(
                 detection.label, detection.confidence, self._label_format
             )
@@ -263,7 +304,7 @@ class DetectionRenderer:
     def _blend_mask(
         canvas: np.ndarray,
         detection: Detection,
-        color: tuple[int, int, int],
+        color: tuple[int, ...],
         alpha: float,
         width: int,
         height: int,
@@ -320,44 +361,185 @@ class DetectionRenderer:
         font_size: float,
         text_thickness: int,
     ) -> None:
-        '''Draw a filled caption plate with text above (or inside) the box.'''
-        (text_w, text_h), baseline = cv2.getTextSize(
-            caption, _FONT, font_size, text_thickness
+        '''Draw a filled caption plate with text above (or inside) the
+        box; on RGBA canvases the plate/text alpha stays opaque.'''
+        text_h, pad, plate_w, plate_h = _plate_geometry(
+            caption, font_size, text_thickness
         )
-        pad = max(2, round(text_h * 0.3))
-        plate_h = text_h + baseline + 2 * pad
-        plate_w = text_w + 2 * pad
         plate_x = min(max(clipped_bbox[0], 0), max(width - plate_w, 0))
         plate_y = clipped_bbox[1] - plate_h
         if plate_y < 0:
             plate_y = clipped_bbox[1]
-        text_color: tuple[int, int, int]
-        if _luminance(color) > _TEXT_FLIP_LUMA:
-            text_color = (0, 0, 0)
-        else:
-            text_color = (255, 255, 255)
-        cv2.rectangle(
-            canvas,
-            (plate_x, plate_y),
-            (plate_x + plate_w, plate_y + plate_h),
-            color,
-            -1,
+        text_color = (
+            (0, 0, 0) if _luminance(color) > _TEXT_FLIP_LUMA else (255, 255, 255)
         )
-        cv2.putText(
+        _draw_plate_and_text(
             canvas,
             caption,
-            (plate_x + pad, plate_y + pad + text_h),
-            _FONT,
-            font_size,
+            color,
             text_color,
+            font_size,
             text_thickness,
-            cv2.LINE_AA,
+            text_h,
+            pad,
+            plate_w,
+            plate_h,
+            plate_x,
+            plate_y,
         )
 
 
 def _luminance(color: tuple[int, int, int]) -> float:
     '''Perceived brightness of an RGB color on the 0..255 scale.'''
     return 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2]
+
+
+def _match_channels(
+    color: tuple[int, int, int], channels: int
+) -> tuple[int, ...]:
+    '''Adapt an RGB color to the canvas channel count (RGBA canvases
+    get opaque alpha for box/caption drawing).'''
+    if channels == 4 and len(color) == 3:
+        return (color[0], color[1], color[2], 255)
+    return color
+
+
+def _plate_geometry(
+    caption: str, font_size: float, text_thickness: int
+) -> tuple[int, int, int, int]:
+    '''Measured text height + padded plate geometry for a caption.
+
+    Args:
+        caption: Text to measure.
+        font_size: OpenCV font scale.
+        text_thickness: Text stroke thickness.
+
+    Returns:
+        ``(text_h, pad, plate_w, plate_h)`` — the drawn text height,
+        the plate padding, and the filled plate size.
+    '''
+    (_text_w, text_h), baseline = cv2.getTextSize(
+        caption, _FONT, font_size, text_thickness
+    )
+    pad = max(2, round(text_h * 0.3))
+    plate_h = text_h + baseline + 2 * pad
+    plate_w = _text_w + 2 * pad
+    return text_h, pad, plate_w, plate_h
+
+
+def _draw_plate_and_text(
+    canvas: np.ndarray,
+    caption: str,
+    plate_color: tuple[int, int, int],
+    text_color: tuple[int, int, int],
+    font_size: float,
+    text_thickness: int,
+    text_h: int,
+    pad: int,
+    plate_w: int,
+    plate_h: int,
+    org_x: int,
+    org_y: int,
+) -> None:
+    '''Draw a filled caption plate and its text at (org_x, org_y).
+
+    On RGBA canvases the plate region is blitted opaquely from an RGB
+    scratch — cv2.putText would otherwise punch holes into the alpha
+    channel of the glyph pixels.
+    '''
+    channels = canvas.shape[2]
+    target: np.ndarray = canvas
+    if channels == 4:
+        canvas_h, canvas_w = canvas.shape[:2]
+        target = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+    cv2.rectangle(
+        target,
+        (org_x, org_y),
+        (org_x + plate_w, org_y + plate_h),
+        plate_color,
+        -1,
+    )
+    cv2.putText(
+        target,
+        caption,
+        (org_x + pad, org_y + pad + text_h),
+        _FONT,
+        font_size,
+        text_color,
+        text_thickness,
+        cv2.LINE_AA,
+    )
+    if channels == 4:
+        x2 = min(org_x + plate_w, canvas_w)
+        y2 = min(org_y + plate_h, canvas_h)
+        canvas[org_y:y2, org_x:x2, :3] = target[org_y:y2, org_x:x2]
+        canvas[org_y:y2, org_x:x2, 3] = 255
+
+
+def draw_corner_caption(
+    canvas: np.ndarray,
+    caption: str,
+    color: tuple[int, int, int],
+    font_size: float = 0.5,
+    corner: str = CORNER_TOP_LEFT,
+) -> None:
+    '''Draw a filled caption plate with text at a canvas corner (in
+    place).  The font size is taken as given — independent of the
+    canvas size, so all canvases get the same font; on RGBA canvases
+    the plate/text alpha stays opaque.
+
+    Args:
+        canvas: HWC RGB or RGBA **uint8** canvas (cv2.putText requires
+            8-bit), modified in place.
+        caption: Text to draw.
+        color: RGB color of the plate; text flips to black when the
+            plate is bright.
+        font_size: OpenCV font size used as-is for the caption text.
+        corner: "top-left" (default) or "bottom-right".
+
+    Raises:
+        ValueError: If the font size is not positive, the canvas is
+            not uint8, or the corner is unknown.
+    '''
+    if font_size <= 0.0:
+        raise ValueError(f"font_size must be positive, got {font_size}")
+    if corner not in _CORNERS:
+        raise ValueError(
+            f"Unknown corner: {corner!r}; expected one of {list(_CORNERS)}"
+        )
+    if canvas.dtype != np.uint8:
+        raise ValueError(
+            "canvas must be uint8 (cv2.putText requires 8-bit); convert"
+            f" before drawing, got {canvas.dtype}"
+        )
+    canvas_h, canvas_w = canvas.shape[:2]
+    text_thickness = max(1, round(font_size))
+    text_h, pad, plate_w, plate_h = _plate_geometry(
+        caption, font_size, text_thickness
+    )
+    text_color = (
+        (0, 0, 0) if _luminance(color) > _TEXT_FLIP_LUMA else (255, 255, 255)
+    )
+    if corner == CORNER_BOTTOM_RIGHT:
+        org_x = canvas_w - plate_w
+        org_y = canvas_h - plate_h
+    else:
+        org_x = 0
+        org_y = 0
+    _draw_plate_and_text(
+        canvas,
+        caption,
+        color,
+        text_color,
+        font_size,
+        text_thickness,
+        text_h,
+        pad,
+        plate_w,
+        plate_h,
+        org_x,
+        org_y,
+    )
 
 
 def scale_detections(

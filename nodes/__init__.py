@@ -44,6 +44,7 @@ from .prompt_annotate import (
 from .save_image import SaveImageNode
 from .save_image_jxl import SaveImageJxlNode
 from .seed_history import SeedHistoryNode
+from .segs_label_filter import SegsLabelFilterNode
 from .segs_overlay import SegsOverlayNode
 from .segs_set_crop_size import SegsSetCropSizeNode
 from .variables import GetVariableNode, SetVariableNode
@@ -53,6 +54,7 @@ NODE_CLASS_MAPPINGS: dict[str, type] = {
     "GetBundle": GetBundleNode,
     "ColorMatch": ColorMatchNode,
     "GroupSwitch": GroupSwitchNode,
+    "SegsLabelFilter": SegsLabelFilterNode,
     "SegsOverlay": SegsOverlayNode,
     "SegsSetCropSize": SegsSetCropSizeNode,
     "PromptAnnotate": PromptAnnotateNode,
@@ -89,6 +91,7 @@ NODE_DISPLAY_NAME_MAPPINGS: dict[str, str] = {
     "GetBundle": "Get Bundle",
     "ColorMatch": "Color Match (Frequency Split)",
     "GroupSwitch": "Group Switch",
+    "SegsLabelFilter": "SEGS Label Filter",
     "SegsOverlay": "SEGS BBox Overlay",
     "SegsSetCropSize": "SEGS Set Crop Size",
     "PromptAnnotate": "Prompt Annotate",
@@ -142,6 +145,7 @@ __all__ = [
     "SaveImageNode",
     "SaveImageJxlNode",
     "SeedHistoryNode",
+    "SegsLabelFilterNode",
     "SegsOverlayNode",
     "SegsSetCropSizeNode",
     "SetVariableNode",
